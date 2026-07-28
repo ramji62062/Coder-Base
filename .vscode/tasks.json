@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Patch screen share and publish fixes",
+			"type": "shell",
+			"command": "python3 - <<'PY'\nfrom pathlib import Path\nroot = Path('/Users/ramji/Documents/collage project/final_project 2')\n# apply patch via python because tool doesn't support direct patch? Actually we can use shell with python.\nPY",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
