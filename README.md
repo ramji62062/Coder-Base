@@ -8,7 +8,7 @@
 | 🤖 **AI Code Assistant** | Claude-powered in-room AI — debug, explain, optimize, type-check your code |
 | 📝 **Teacher Notes** | Create, pin, publish, and download Markdown notes. Students see published notes |
 | ⏱️ **Session Timer** | Countdown timer with presets (15–120 min), warning alerts, start/pause/end lifecycle |
-| 🧩 **VS Code Layout** | Activity bar with all 7 panels: Explorer, Debug, Chat, Whiteboard, AI, Notes, Timer |
+| 🧩 **Code Editor Layout** | Activity bar with all 7 panels: Explorer, Debug, Chat, Whiteboard, AI, Notes, Timer |
 
 ---
 
