@@ -1,6 +1,5 @@
-# CodeTogether — Upgraded v2.0
+# CodeTogether
 
-## 🚀 What's New in Phase 2
 
 ### ✅ New Features Added
 | Feature | Description |
