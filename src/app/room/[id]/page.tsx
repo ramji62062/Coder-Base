@@ -14,6 +14,7 @@ import BreadcrumbBar from "@/components/BreadcrumbBar";
 import { type FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 import { type RemoteCursor } from "@/components/Editor";
+import { Eye } from "lucide-react";
 
 type Room = {
   id: string;
@@ -52,6 +53,15 @@ function getDefaultFiles(lang: string): FileItem[] {
   return [main, { name: "README.md", content: "# CodeTogether Room\n\nCollaborative coding session.\n", language: "markdown" }];
 }
 
+function parseRoomMeta(roomName: string | null) {
+  if (!roomName || !roomName.startsWith("{")) return {};
+  try {
+    return JSON.parse(roomName);
+  } catch {
+    return {};
+  }
+}
+
 function normalizePath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/");
 }
@@ -65,6 +75,96 @@ function isPathInside(path: string, parent: string) {
   const cleanPath = normalizePath(path);
   const cleanParent = normalizePath(parent);
   return cleanPath === cleanParent || cleanPath.startsWith(`${cleanParent}/`);
+}
+
+function getFolderPaths(files: FileItem[]) {
+  const folders = new Set<string>();
+  for (const file of files) {
+    const path = normalizePath(file.path || file.name);
+    const parts = path.split("/");
+    for (let i = 0; i < parts.length - 1; i++) {
+      folders.add(parts.slice(0, i + 1).join("/"));
+    }
+  }
+  return Array.from(folders);
+}
+
+function getParentDirectory(path: string) {
+  const normalized = normalizePath(path);
+  const parts = normalized.split("/");
+  parts.pop();
+  return parts.join("/");
+}
+
+function resolvePreviewPath(basePath: string, relativePath: string) {
+  const rel = normalizePath(relativePath.replace(/^\//, ""));
+  const baseDir = getParentDirectory(basePath);
+  return normalizePath([baseDir, rel].filter(Boolean).join("/"));
+}
+
+function getPreviewHtmlFile(files: FileItem[], activeFile: string) {
+  const fileMap = new Map(files.map((file) => [normalizePath(file.path || file.name), file]));
+  const activeKey = normalizePath(activeFile);
+  const activeFileItem = fileMap.get(activeKey);
+
+  if (activeFileItem?.language === "html") {
+    return activeFileItem;
+  }
+
+  return fileMap.get("index.html")
+    || fileMap.get("index.htm")
+    || Array.from(fileMap.values()).find((file) => file.language === "html");
+}
+
+function buildPreviewSrcDoc(files: FileItem[], activeFile: string) {
+  const htmlFile = getPreviewHtmlFile(files, activeFile);
+
+  if (!htmlFile || htmlFile.language !== "html") {
+    return "";
+  }
+
+  const fileMap = new Map(files.map((file) => [normalizePath(file.path || file.name), file]));
+  let html = htmlFile.content || "";
+
+  const cssMap = new Map(
+    Array.from(fileMap.values())
+      .filter((file) => file.language === "css")
+      .map((file) => [normalizePath(file.path || file.name), file.content || ""]),
+  );
+
+  const jsMap = new Map(
+    Array.from(fileMap.values())
+      .filter((file) => file.language === "javascript")
+      .map((file) => [normalizePath(file.path || file.name), file.content || ""]),
+  );
+
+  html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
+    const resolved = resolvePreviewPath(htmlFile.path || htmlFile.name, href);
+    const css = cssMap.get(resolved);
+    if (css !== undefined) {
+      return `<style>${css}</style>`;
+    }
+    return match;
+  });
+
+  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+    const resolved = resolvePreviewPath(htmlFile.path || htmlFile.name, src);
+    const js = jsMap.get(resolved);
+    if (js !== undefined) {
+      return `<script>${js}</script>`;
+    }
+    return match;
+  });
+
+  if (!/<meta[^>]*charset/i.test(html)) {
+    if (/<head[^>]*>/i.test(html)) {
+      html = html.replace(/<head([^>]*)>/i, `<head$1>\n<meta charset=\"utf-8\">`);
+    } else {
+      html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body>${html}</body></html>`;
+    }
+  }
+
+  return html;
 }
 
 function getLangFromPath(path: string) {
@@ -129,6 +229,7 @@ export default function RoomPage() {
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [modifiedFiles, setModifiedFiles] = useState<Set<string>>(new Set());
   const [projectName, setProjectName] = useState("Cloud workspace");
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(["src"]));
   const [remoteCursors, setRemoteCursors] = useState<Record<string, CollaboratorCursor>>({});
   const directoryHandleRef = useRef<FileSystemDirectoryHandleLike | null>(null);
   const fileHandlesRef = useRef<Map<string, FileSystemFileHandleLike>>(new Map());
@@ -142,6 +243,8 @@ export default function RoomPage() {
 
   const [activePanel, setActivePanel] = useState<string>("files");
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "saved">("synced");
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
@@ -160,6 +263,8 @@ export default function RoomPage() {
   const [pubDesc, setPubDesc] = useState("");
   const [pubCat, setPubCat] = useState("Tutorials");
   const [pubAuthor, setPubAuthor] = useState("");
+  const [pubVisibility, setPubVisibility] = useState<"public" | "private">("public");
+  const [pubAccessCode, setPubAccessCode] = useState("");
   const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
@@ -187,6 +292,10 @@ export default function RoomPage() {
       addToast("Unable to publish: user session not loaded.", "error");
       return;
     }
+    if (pubVisibility === "private" && !pubAccessCode.trim()) {
+      addToast("Private library publishing requires a passcode.", "error");
+      return;
+    }
 
     const publishFiles = files
       .filter((file) => !file.isFolder)
@@ -202,6 +311,9 @@ export default function RoomPage() {
       const codeCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       const libraryNameObj = {
         isLibrary: true,
+        isPrivate: pubVisibility === "private",
+        followersOnly: pubVisibility === "private",
+        accessCode: pubVisibility === "private" ? pubAccessCode.trim() : "",
         title,
         description: desc,
         category: pubCat,
@@ -223,9 +335,11 @@ export default function RoomPage() {
         throw new Error(error.message);
       }
 
-      addToast("Workspace successfully published to Shared Library!", "success");
+      addToast(pubVisibility === "private" ? "Workspace published to Private Library!" : "Workspace successfully published to Shared Library!", "success");
       setPublishOpen(false);
       setPubDesc("");
+      setPubAccessCode("");
+      setPubVisibility("public");
     } catch (err: any) {
       console.error(err);
       addToast(err.message || "Failed to publish workspace.", "error");
@@ -275,20 +389,33 @@ export default function RoomPage() {
 
       if (roomError || !data) { router.replace("/dashboard"); setLoading(false); return; }
 
+      const roomMeta: any = parseRoomMeta(data.name);
+
+      if ((roomMeta.isPrivate || roomMeta.accessCode) && data.created_by !== session.user.id) {
+        const { data: participant } = await supabase
+          .from("room_participants")
+          .select("id")
+          .eq("room_id", data.id)
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+
+        if (!participant) {
+          addToast("Enter the room code and access code to join this private room.", "error");
+          router.replace("/dashboard");
+          setLoading(false);
+          return;
+        }
+      }
+
       // Parse scheduling metadata from name
       let schedule = { isScheduled: false, startAt: null, endAt: null, invitedEmails: [] };
-      if (data.name && data.name.startsWith("{")) {
-        try {
-          const parsed = JSON.parse(data.name);
-          if (parsed.isScheduled) {
-            schedule = {
-              isScheduled: true,
-              startAt: parsed.startAt,
-              endAt: parsed.endAt,
-              invitedEmails: parsed.invitedEmails || [],
-            };
-          }
-        } catch {}
+      if (roomMeta.isScheduled) {
+        schedule = {
+          isScheduled: true,
+          startAt: roomMeta.startAt,
+          endAt: roomMeta.endAt,
+          invitedEmails: roomMeta.invitedEmails || [],
+        };
       }
 
       if (schedule.isScheduled) {
@@ -415,16 +542,44 @@ export default function RoomPage() {
         }
       })
       .on("broadcast", { event: "project-opened" }, ({ payload }) => {
-        if (payload.userId === currentUserId || !payload.files) return;
-        const nextFiles = payload.files.map(normalizeFileItem);
-        const nextActiveFile = normalizePath(payload.activeFile || nextFiles.find((file: FileItem) => !file.isFolder)?.name || "");
-        setProjectName(payload.projectName || "Shared project");
-        setFiles(nextFiles);
-        if (nextActiveFile) {
-          setActiveFile(nextActiveFile);
-          setOpenTabs((prev) => prev.includes(nextActiveFile) ? prev : [...prev, nextActiveFile]);
-        }
-        addToast(`${payload.userName || "A collaborator"} opened ${payload.projectName || "a project"}`, "info");
+        if (payload.userId === currentUserId) return;
+        const applyProject = async () => {
+          let nextFiles: FileItem[] | null = null;
+          if (Array.isArray(payload.files) && payload.files.length > 0) {
+            nextFiles = payload.files.map(normalizeFileItem);
+          } else {
+            const { data, error } = await supabase.from("rooms").select("files_json").eq("id", roomId).maybeSingle();
+            if (error || !data?.files_json) return;
+            nextFiles = (data.files_json || []).map(normalizeFileItem);
+          }
+
+          const nextActiveFile = normalizePath(payload.activeFile || nextFiles?.find((file: FileItem) => !file.isFolder)?.name || "");
+          setProjectName(payload.projectName || "Shared project");
+          if (nextFiles) {
+            setFiles(nextFiles);
+          }
+          const expanded = Array.isArray(payload.expandedFolders) && payload.expandedFolders.length > 0
+            ? payload.expandedFolders.map(normalizePath)
+            : getFolderPaths(nextFiles || []);
+          setExpandedFolders(new Set(expanded));
+          if (nextActiveFile) {
+            setActiveFile(nextActiveFile);
+          }
+          setOpenTabs(payload.openTabs && Array.isArray(payload.openTabs) && payload.openTabs.length > 0
+            ? payload.openTabs.map(normalizePath)
+            : nextActiveFile ? [nextActiveFile] : []);
+          addToast(`${payload.userName || "A collaborator"} opened ${payload.projectName || "a project"}`, "info");
+        };
+        void applyProject();
+      })
+      .on("broadcast", { event: "folder-toggle" }, ({ payload }) => {
+        if (payload.userId === currentUserId || !payload.folder) return;
+        setExpandedFolders((prev) => {
+          const next = new Set(prev);
+          if (payload.expanded) next.add(payload.folder);
+          else next.delete(payload.folder);
+          return next;
+        });
       })
       .on("broadcast", { event: "cursor-position" }, ({ payload }) => {
         if (payload.userId === currentUserId || !payload.file) return;
@@ -461,6 +616,17 @@ export default function RoomPage() {
     setActiveFile(path);
     if (!openTabs.includes(path)) setOpenTabs((prev) => [...prev, path]);
   }, [openTabs, files]);
+
+  const handleFolderToggle = useCallback((folder: string, expanded: boolean) => {
+    const normalized = normalizePath(folder);
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (expanded) next.add(normalized);
+      else next.delete(normalized);
+      return next;
+    });
+    roomChannelRef.current?.send({ type: "broadcast", event: "folder-toggle", payload: { folder: normalized, expanded, userId: currentUserId } });
+  }, [currentUserId]);
 
   const writeFileToLocalProject = useCallback(async (path: string, content: string) => {
     const cleanPath = normalizePath(path);
@@ -531,7 +697,7 @@ export default function RoomPage() {
       setOpenTabs(firstFile ? [firstFile.name] : []);
       setActiveFile(firstFile?.name || "");
       setModifiedFiles(new Set());
-      saveFilesToDb(projectFiles);
+      await supabase.from("rooms").update({ files_json: projectFiles }).eq("id", roomId);
       await roomChannelRef.current?.send({
         type: "broadcast",
         event: "project-opened",
@@ -539,6 +705,8 @@ export default function RoomPage() {
           files: projectFiles,
           activeFile: firstFile?.name || "",
           projectName: rootHandle.name || "Local project",
+          expandedFolders: getFolderPaths(projectFiles),
+          openTabs: firstFile ? [firstFile.name] : [],
           userId: currentUserId,
           userName: currentUserName,
         },
@@ -776,6 +944,26 @@ export default function RoomPage() {
   }, [activeFile, currentUserId, currentUserName]);
   const handleSyncStatus = useCallback((status: "synced" | "syncing" | "saved") => { setSyncStatus(status); }, []);
 
+  const previewSrcDoc = useMemo(() => buildPreviewSrcDoc(files, activeFile), [files, activeFile]);
+  const previewPath = useMemo(() => {
+    const htmlFile = getPreviewHtmlFile(files, activeFile);
+    return htmlFile?.path || htmlFile?.name || "";
+  }, [files, activeFile]);
+
+  const handlePreviewOpen = useCallback(() => {
+    setPreviewFullscreen(false);
+    setPreviewOpen(true);
+  }, []);
+
+  const handlePreviewClose = useCallback(() => {
+    setPreviewOpen(false);
+    setPreviewFullscreen(false);
+  }, []);
+
+  const togglePreviewFullscreen = useCallback(() => {
+    setPreviewFullscreen((prev) => !prev);
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => {
       const cutoff = Date.now() - 15000;
@@ -821,7 +1009,7 @@ export default function RoomPage() {
         micOn={micOn} cameraOn={cameraOn} screenOn={screenOn}
         onMicToggle={handleMicToggle} onCameraToggle={handleCameraToggle} 
         onScreenToggle={handleScreenToggle}
-        onRunCode={handleRunCode} onAddToast={addToast}
+        onRunCode={handleRunCode} onPreview={handlePreviewOpen} onAddToast={addToast}
         onPublishClick={() => setPublishOpen(true)}
       />
 
@@ -842,7 +1030,7 @@ export default function RoomPage() {
           currentUserId={currentUserId} currentUserName={currentUserName}
           language={language} onLanguageChange={handleLanguageChange}
           roomName={roomName} onRoomNameChange={setRoomName} onNewChatMessage={handleNewChatMessage}
-          files={files} activeFile={activeFile} onFileSelect={handleFileSelect}
+          files={files} activeFile={activeFile} openFileNames={openTabs} expandedFolders={Array.from(expandedFolders)} onFolderToggle={handleFolderToggle} onFileSelect={handleFileSelect}
           onFileCreate={handleFileCreate} onFileDelete={handleFileDelete} onFileRename={handleFileRename}
           onOpenProject={handleOpenProject} onSaveProject={handleSaveProject} projectName={projectName}
           breakpoints={breakpoints} onClearBreakpoints={() => setBreakpoints([])}
@@ -893,6 +1081,53 @@ export default function RoomPage() {
               />
             </div>
           )}
+
+          {previewOpen && (
+            <div style={{
+              position: previewFullscreen ? "fixed" : "absolute",
+              inset: previewFullscreen ? 0 : "24px",
+              zIndex: 9999,
+              background: "rgba(15, 15, 20, 0.98)",
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: previewFullscreen ? 0 : 16,
+              boxShadow: previewFullscreen ? "none" : "0 32px 80px rgba(0,0,0,0.55)",
+              overflow: "hidden",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#111316", borderBottom: "1px solid #2a2a38" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Eye size={14} color="#fff" />
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Website Preview</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>{previewPath || "index.html"}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={togglePreviewFullscreen} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", cursor: "pointer", fontSize: 11 }}>
+                    {previewFullscreen ? "Exit Full Screen" : "Full Screen"}
+                  </button>
+                  <button onClick={handlePreviewClose} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 11 }}>
+                    Close
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, position: "relative", background: "#0b0c11" }}>
+                {previewSrcDoc ? (
+                  <iframe
+                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={previewSrcDoc}
+                    title="CodeTogether Website Preview"
+                    style={{ width: "100%", height: "100%", border: "none", background: "#020204" }}
+                  />
+                ) : (
+                  <div style={{ padding: 24, color: "#cbd5e1", fontSize: 13 }}>
+                    <div style={{ marginBottom: 8, fontWeight: 700 }}>No website preview available.</div>
+                    <div>Open or create an HTML file in the workspace, then click Preview again.</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -935,6 +1170,37 @@ export default function RoomPage() {
                   style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px", outline: "none", boxSizing: "border-box" }}
                 />
               </div>
+
+              <div>
+                <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Publish Destination</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button
+                    onClick={() => setPubVisibility("public")}
+                    style={{ padding: "10px", border: pubVisibility === "public" ? "1px solid #10b981" : "1px solid #333", borderRadius: 8, background: pubVisibility === "public" ? "#10b98120" : "#111", color: pubVisibility === "public" ? "#34d399" : "#aaa", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
+                  >
+                    Shared Library
+                  </button>
+                  <button
+                    onClick={() => setPubVisibility("private")}
+                    style={{ padding: "10px", border: pubVisibility === "private" ? "1px solid #f43f5e" : "1px solid #333", borderRadius: 8, background: pubVisibility === "private" ? "#f43f5e20" : "#111", color: pubVisibility === "private" ? "#f87171" : "#aaa", cursor: "pointer", fontWeight: 800, fontSize: 12 }}
+                  >
+                    Private Library
+                  </button>
+                </div>
+              </div>
+
+              {pubVisibility === "private" && (
+                <div>
+                  <label style={{ fontSize: 10, color: "#f87171", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Private Access Code</label>
+                  <input
+                    value={pubAccessCode}
+                    onChange={(e) => setPubAccessCode(e.target.value)}
+                    placeholder="Required for non-followers"
+                    style={{ width: "100%", background: "#111", border: "1px solid #f43f5e55", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px", outline: "none", boxSizing: "border-box" }}
+                  />
+                  <p style={{ color: "#777", fontSize: 11, margin: "6px 0 0" }}>Followers can access private library items from your profile; others need this passcode.</p>
+                </div>
+              )}
 
               <div>
                 <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Category</label>

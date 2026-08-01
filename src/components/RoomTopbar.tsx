@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Play, Share2, LogOut, Mic, MicOff, Video, VideoOff, Monitor, Copy,
   ChevronRight, Code, Search, X, Settings, RotateCcw, Terminal, FileText,
-  FolderOpen, Save, FilePlus
+  FolderOpen, Save, FilePlus, Eye
 } from "lucide-react";
 
 type Participant = { userId: string; name: string; avatar?: string | null };
@@ -26,6 +26,7 @@ type RoomTopbarProps = {
   onCameraToggle: () => void;
   onScreenToggle: () => void;
   onRunCode: () => void;
+  onPreview?: () => void;
   onAddToast?: (msg: string, type: "info" | "error" | "success") => void;
   onPublishClick?: () => void;
 };
@@ -51,7 +52,7 @@ export default function RoomTopbar({
   language, onLanguageChange, participants,
   micOn, cameraOn, screenOn,
   onMicToggle, onCameraToggle, onScreenToggle,
-  onRunCode, onAddToast, onPublishClick,
+  onRunCode, onPreview, onAddToast, onPublishClick,
 }: RoomTopbarProps) {
   const router = useRouter();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -252,6 +253,14 @@ export default function RoomTopbar({
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#2ea043", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
           >
             <Play size={11} fill="white" /> Run
+          </button>
+
+          {/* Preview */}
+          <button
+            onClick={onPreview}
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#2563eb", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, fontWeight: 600, cursor: onPreview ? "pointer" : "not-allowed", opacity: onPreview ? 1 : 0.5 }}
+          >
+            <Eye size={11} fill="white" /> Preview
           </button>
 
           {/* Share */}

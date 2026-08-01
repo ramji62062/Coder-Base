@@ -57,7 +57,19 @@ const peerConfig: RTCConfiguration = {
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
+    { urls: "stun:stun.services.mozilla.com" },
+    { urls: "stun:global.stun.twilio.com:3478" },
+    {
+      urls: [
+        "turn:openrelay.metered.ca:80",
+        "turn:openrelay.metered.ca:443",
+        "turn:openrelay.metered.ca:443?transport=tcp",
+      ],
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 const videoConstraints: MediaTrackConstraints = {
   width: { ideal: 1280 },
@@ -148,6 +160,8 @@ export default function ParticipantsCallPanel({
   const peerInfoRef = useRef<Record<string, ParticipantCallState>>({});
   const makingOfferRef = useRef<Record<string, boolean>>({});
   const ignoredOfferRef = useRef<Record<string, boolean>>({});
+  const iceCandidatesQueueRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
+  const pendingPeerConnectionsRef = useRef<Record<string, Promise<RTCPeerConnection>>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
   const audioTrackRef = useRef<MediaStreamTrack | null>(null);
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
@@ -258,6 +272,8 @@ export default function ParticipantsCallPanel({
     peerInfoRef.current = {};
     makingOfferRef.current = {};
     ignoredOfferRef.current = {};
+    iceCandidatesQueueRef.current = {};
+    pendingPeerConnectionsRef.current = {};
     try { socketRef.current?.emit("call:leave"); } catch {}
     try { socketRef.current?.disconnect(); } catch {}
     socketRef.current = null;
@@ -288,16 +304,21 @@ export default function ParticipantsCallPanel({
     try { socketRef.current?.emit("call:state", localStateRef.current); } catch {}
   }, []);
 
-  // ── Fixed transceiver matching: use index-based approach since we always add audio first, video second ──
+  // Dynamic sender / transceiver matching for track replacements
   const replaceTrackForAllPeers = useCallback((kind: "audio" | "video", track: MediaStreamTrack | null) => {
     Object.values(peerConnectionsRef.current).forEach((pc) => {
       try {
-        const transceivers = pc.getTransceivers();
-        // We add audio transceiver first (index 0), video transceiver second (index 1)
-        const targetIndex = kind === "audio" ? 0 : 1;
-        const transceiver = transceivers[targetIndex];
-        if (transceiver?.sender) {
-          transceiver.sender.replaceTrack(track).catch(() => undefined);
+        const senders = pc.getSenders();
+        const sender = senders.find((s) => s.track?.kind === kind || (!s.track && kind === "video"));
+        if (sender) {
+          sender.replaceTrack(track).catch(() => undefined);
+        } else {
+          const transceivers = pc.getTransceivers();
+          const targetIndex = kind === "audio" ? 0 : 1;
+          const transceiver = transceivers[targetIndex];
+          if (transceiver?.sender) {
+            transceiver.sender.replaceTrack(track).catch(() => undefined);
+          }
         }
       } catch {}
     });
@@ -424,118 +445,155 @@ export default function ParticipantsCallPanel({
   const createPeerConnection = useCallback(async (peer: ParticipantCallState, initiator: boolean) => {
     const existing = peerConnectionsRef.current[peer.socketId];
     if (existing && existing.connectionState !== "closed" && existing.connectionState !== "failed") return existing;
+    const pending = pendingPeerConnectionsRef.current[peer.socketId];
+    if (pending) return await pending;
 
-    // Clean up any existing broken connection
-    if (existing) {
-      try { existing.close(); } catch {}
-      delete peerConnectionsRef.current[peer.socketId];
-    }
-
-    const pc = new RTCPeerConnection(peerConfig);
-    peerConnectionsRef.current[peer.socketId] = pc;
-
-    await getLocalMedia();
-
-    // Always add transceivers in order: audio (index 0), video (index 1)
-    const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
-    const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
-
-    try {
-      await audioTransceiver.sender.replaceTrack(audioTrackRef.current);
-    } catch { /* no audio track available */ }
-
-    try {
-      await videoTransceiver.sender.replaceTrack(screenTrackRef.current || cameraTrackRef.current);
-    } catch { /* no video track available */ }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        const candidate = plainIceCandidate(event.candidate);
-        if (candidate) sendSignal(peer.socketId, { type: "ice", candidate });
+    const initPromise = (async () => {
+      // Clean up any existing broken connection
+      if (existing) {
+        try { existing.close(); } catch {}
+        delete peerConnectionsRef.current[peer.socketId];
       }
-    };
 
-    pc.onnegotiationneeded = () => {
-      if (initiator && pc.signalingState === "stable") {
-        sendOffer(peer.socketId, pc).catch(() => undefined);
-      }
-    };
+      const pc = new RTCPeerConnection(peerConfig);
+      peerConnectionsRef.current[peer.socketId] = pc;
 
-    pc.ontrack = (event) => {
-      const remoteStream = event.streams[0] || new MediaStream([event.track]);
-      setCallParticipants((prev) => {
-        const current = prev[peer.socketId] || peer;
-        // Always create a fresh stream to ensure React detects the change
-        const existingStream = current.stream;
-        let stream: MediaStream;
-        if (existingStream) {
-          stream = existingStream;
-          if (!stream.getTracks().includes(event.track)) {
-            stream.addTrack(event.track);
+      const stream = await getLocalMedia();
+
+      // Attach local tracks directly to peer connection
+      if (stream && stream.getTracks().length > 0) {
+        stream.getTracks().forEach((track) => {
+          try { pc.addTrack(track, stream); } catch {}
+        });
+      } else {
+        const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+        const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+
+        try {
+          if (audioTrackRef.current) await audioTransceiver.sender.replaceTrack(audioTrackRef.current);
+        } catch { /* no audio track available */ }
+
+        try {
+          if (screenTrackRef.current || cameraTrackRef.current) {
+            await videoTransceiver.sender.replaceTrack(screenTrackRef.current || cameraTrackRef.current);
           }
-        } else {
-          stream = remoteStream;
-        }
-        return { ...prev, [peer.socketId]: { ...current, stream } };
-      });
-
-      // Set up remote audio analyser
-      if (event.track.kind === "audio") {
-        const stream = event.streams[0] || new MediaStream([event.track]);
-        setupRemoteAudioAnalyser(peer.socketId, stream);
-        if (!speakingIntervalRef.current) setupSpeakingDetection();
+        } catch { /* no video track available */ }
       }
 
-      // Force video tile update by incrementing version
-      setLocalStreamVersion((v) => v + 1);
-    };
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const candidate = plainIceCandidate(event.candidate);
+          if (candidate) sendSignal(peer.socketId, { type: "ice", candidate });
+        }
+      };
 
-    pc.onconnectionstatechange = () => {
-      const state = pc.connectionState;
+      pc.onnegotiationneeded = () => {
+        // Only trigger renegotiation if connection is already established and stable
+        if (pc.signalingState === "stable" && pc.remoteDescription) {
+          sendOffer(peer.socketId, pc).catch(() => undefined);
+        }
+      };
 
-      // Update peer connection state for UI
-      setCallParticipants((prev) => {
-        if (!prev[peer.socketId]) return prev;
-        return { ...prev, [peer.socketId]: { ...prev[peer.socketId], connectionState: state } };
-      });
+      pc.ontrack = (event) => {
+        const remoteStream = event.streams[0] || new MediaStream([event.track]);
+        setCallParticipants((prev) => {
+          const current = prev[peer.socketId] || peer;
+          const existingStream = current.stream;
+          let stream: MediaStream;
+          if (existingStream) {
+            if (!existingStream.getTracks().some((t) => t.id === event.track.id)) {
+              existingStream.addTrack(event.track);
+            }
+            // Always return a fresh MediaStream object reference so React detects state update
+            stream = new MediaStream(existingStream.getTracks());
+          } else {
+            stream = new MediaStream(remoteStream.getTracks());
+          }
+          return { ...prev, [peer.socketId]: { ...current, stream } };
+        });
 
-      if (state === "failed") {
-        // Attempt ICE restart before giving up
-        if (initiator && pc.signalingState === "stable") {
+        // Set up remote audio analyser
+        if (event.track.kind === "audio") {
+          const stream = event.streams[0] || new MediaStream([event.track]);
+          setupRemoteAudioAnalyser(peer.socketId, stream);
+          if (!speakingIntervalRef.current) setupSpeakingDetection();
+        }
+
+        // Force video tile update by incrementing version
+        setLocalStreamVersion((v) => v + 1);
+      };
+
+      // Fallback timer: if connection stays stuck in connecting/new for >5s, attempt ICE restart
+      const connectingTimer = setTimeout(() => {
+        if ((pc.connectionState === "connecting" || pc.connectionState === "new") && pc.signalingState === "stable") {
           pc.createOffer({ iceRestart: true })
             .then((offer) => pc.setLocalDescription(offer))
             .then(() => {
               const sdp = plainSessionDescription(pc.localDescription);
               if (sdp) sendSignal(peer.socketId, { type: "offer", sdp });
             })
-            .catch(() => {
-              try { pc.close(); } catch {}
-              delete peerConnectionsRef.current[peer.socketId];
-            });
+            .catch(() => undefined);
         }
-      } else if (state === "closed") {
-        delete peerConnectionsRef.current[peer.socketId];
-      }
-      if (state === "connected") setError("");
-    };
+      }, 5000);
 
-    pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "failed" && initiator) {
-        pc.createOffer({ iceRestart: true })
-          .then((offer) => pc.setLocalDescription(offer))
-          .then(() => {
-            const sdp = plainSessionDescription(pc.localDescription);
-            if (sdp) sendSignal(peer.socketId, { type: "offer", sdp });
-          })
-          .catch(() => undefined);
-      }
-    };
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === "connected") clearTimeout(connectingTimer);
 
-    if (initiator) {
-      await sendOffer(peer.socketId, pc);
+        // Update peer connection state for UI
+        setCallParticipants((prev) => {
+          if (!prev[peer.socketId]) return prev;
+          return { ...prev, [peer.socketId]: { ...prev[peer.socketId], connectionState: state } };
+        });
+
+        if (state === "failed" || state === "disconnected") {
+          // Attempt ICE restart before giving up
+          if (pc.signalingState === "stable") {
+            pc.createOffer({ iceRestart: true })
+              .then((offer) => pc.setLocalDescription(offer))
+              .then(() => {
+                const sdp = plainSessionDescription(pc.localDescription);
+                if (sdp) sendSignal(peer.socketId, { type: "offer", sdp });
+              })
+              .catch(() => {
+                if (state === "failed") {
+                  try { pc.close(); } catch {}
+                  delete peerConnectionsRef.current[peer.socketId];
+                }
+              });
+          }
+        } else if (state === "closed") {
+          clearTimeout(connectingTimer);
+          delete peerConnectionsRef.current[peer.socketId];
+        }
+        if (state === "connected") setError("");
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if ((pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") && pc.signalingState === "stable") {
+          pc.createOffer({ iceRestart: true })
+            .then((offer) => pc.setLocalDescription(offer))
+            .then(() => {
+              const sdp = plainSessionDescription(pc.localDescription);
+              if (sdp) sendSignal(peer.socketId, { type: "offer", sdp });
+            })
+            .catch(() => undefined);
+        }
+      };
+
+      if (initiator) {
+        await sendOffer(peer.socketId, pc);
+      }
+
+      return pc;
+    })();
+
+    pendingPeerConnectionsRef.current[peer.socketId] = initPromise;
+    try {
+      return await initPromise;
+    } finally {
+      delete pendingPeerConnectionsRef.current[peer.socketId];
     }
-
-    return pc;
   }, [getLocalMedia, sendOffer, sendSignal, setupRemoteAudioAnalyser, setupSpeakingDetection]);
 
   const handleSignal = useCallback(async ({ from, signal }: { from: string; signal: SignalPayload }) => {
@@ -569,18 +627,39 @@ export default function ParticipantsCallPanel({
         await pc.setLocalDescription(answer);
         const sdp = plainSessionDescription(pc.localDescription || answer);
         if (sdp) sendSignal(from, { type: "answer", sdp });
+
+        // Flush queued ICE candidates after setting remote description
+        if (iceCandidatesQueueRef.current[from]) {
+          const queued = iceCandidatesQueueRef.current[from];
+          delete iceCandidatesQueueRef.current[from];
+          for (const cand of queued) {
+            try { await pc.addIceCandidate(cand); } catch {}
+          }
+        }
       } else if (signal.type === "answer") {
         if (pc.signalingState === "have-local-offer") {
           await pc.setRemoteDescription(signal.sdp);
+
+          // Flush queued ICE candidates after setting remote description
+          if (iceCandidatesQueueRef.current[from]) {
+            const queued = iceCandidatesQueueRef.current[from];
+            delete iceCandidatesQueueRef.current[from];
+            for (const cand of queued) {
+              try { await pc.addIceCandidate(cand); } catch {}
+            }
+          }
         }
       } else if (signal.type === "ice") {
         try {
-          if (pc.remoteDescription) {
+          if (pc.remoteDescription && pc.remoteDescription.type) {
             await pc.addIceCandidate(signal.candidate);
+          } else {
+            if (!iceCandidatesQueueRef.current[from]) iceCandidatesQueueRef.current[from] = [];
+            iceCandidatesQueueRef.current[from].push(signal.candidate);
           }
         } catch (err) {
           if (!ignoredOfferRef.current[from]) {
-            // Silently ignore ICE candidate errors — they're common during renegotiation
+            // Silently ignore ICE candidate errors — common during renegotiation
           }
         }
       }
@@ -620,9 +699,19 @@ export default function ParticipantsCallPanel({
 
       socket.on("call:peers", async (peers: ParticipantCallState[]) => {
         if (!mountedRef.current) return;
-        peers.forEach(setRemotePeer);
         setConnState("joined");
         joiningRef.current = false;
+
+        // Register all existing peers and create connections to them
+        for (const p of peers) {
+          setRemotePeer(p);
+          // We are the newcomer, so we initiate connections to everyone already in the room
+          try {
+            await createPeerConnection(p, true);
+          } catch {
+            // Will retry on signal
+          }
+        }
         emitLocalState();
       });
 
@@ -631,8 +720,10 @@ export default function ParticipantsCallPanel({
         setRemotePeer(peer);
         setConnState("joined");
         joiningRef.current = false;
+        // The newly joined peer initiates the offer via call:peers (initiator = true).
+        // We initialize our local connection as recipient (initiator = false) to receive their offer without glare.
         try {
-          await createPeerConnection(peer, true);
+          await createPeerConnection(peer, false);
         } catch {
           // Peer connection failed, will retry on signal
         }
@@ -1222,18 +1313,34 @@ function VideoTile({ peer, muted, isPinned, onPin, isFullscreen }: {
   onPin?: () => void;
   isFullscreen?: boolean;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [trackVersion, setTrackVersion] = useState(0);
+  const hasVideo = Boolean(peer.stream && (peer.cameraOn || peer.screenOn));
+
+  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && peer.stream) {
+      el.srcObject = peer.stream;
+      el.play().catch(() => {});
+    }
+  }, [peer.stream]);
 
   // Update video srcObject when stream or tracks change
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !peer.stream) return;
+    if (!video || !peer.stream || !hasVideo) return;
     video.srcObject = peer.stream;
+    video.play().catch(() => {});
 
     // Listen for track changes on the stream
-    const handleTrackChange = () => setTrackVersion((v) => v + 1);
+    const handleTrackChange = () => {
+      setTrackVersion((v) => v + 1);
+      if (videoRef.current && peer.stream) {
+        videoRef.current.srcObject = peer.stream;
+        videoRef.current.play().catch(() => {});
+      }
+    };
     peer.stream.addEventListener("addtrack", handleTrackChange);
     peer.stream.addEventListener("removetrack", handleTrackChange);
 
@@ -1241,7 +1348,7 @@ function VideoTile({ peer, muted, isPinned, onPin, isFullscreen }: {
       peer.stream?.removeEventListener("addtrack", handleTrackChange);
       peer.stream?.removeEventListener("removetrack", handleTrackChange);
     };
-  }, [peer.stream, trackVersion]);
+  }, [peer.stream, trackVersion, hasVideo, peer.cameraOn, peer.screenOn]);
 
   // Always play remote peer audio via a dedicated audio element to guarantee sound even when video is off
   useEffect(() => {
@@ -1252,7 +1359,6 @@ function VideoTile({ peer, muted, isPinned, onPin, isFullscreen }: {
     audio.play().catch(() => {});
   }, [peer.stream, muted]);
 
-  const hasVideo = peer.stream && (peer.cameraOn || peer.screenOn);
   const initials = peer.name.replace(/\s*\(Me\)$/, "").slice(0, 2).toUpperCase();
 
   return (
@@ -1274,7 +1380,7 @@ function VideoTile({ peer, muted, isPinned, onPin, isFullscreen }: {
 
       {hasVideo ? (
         <video
-          ref={videoRef}
+          ref={setVideoRef}
           autoPlay
           playsInline
           muted={true} // Video element is always muted; audio is played via the dedicated <audio> element

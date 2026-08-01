@@ -22,6 +22,7 @@ export default function JoinByCodePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
@@ -65,39 +66,25 @@ export default function JoinByCodePage() {
       data: { session },
     } = await supabase.auth.getSession();
 
-    // Logged-in users join directly using their user id.
-    if (session?.user?.id) {
-      const { error: participantError } = await supabase.from("room_participants").insert({
-        room_id: room.id,
-        user_id: session.user.id,
-      });
-
-      if (participantError) {
-        setError(participantError.message);
-        setJoining(false);
-        return;
-      }
-
-      router.push(`/room/${room.id}`);
-      return;
-    }
-
-    // Guests must enter a display name before joining.
     const safeName = displayName.trim() || generateGuestName();
-    localStorage.setItem("guest_name", safeName);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
 
-    const { error: guestJoinError } = await supabase.from("room_participants").insert({
-      room_id: room.id,
-      guest_name: safeName,
+    const res = await fetch("/api/join-room", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ roomCode: room.room_code, accessCode, guestName: safeName }),
     });
+    const result = await res.json();
 
-    if (guestJoinError) {
-      setError(guestJoinError.message);
+    if (!res.ok || !result.roomId) {
+      setError(result.error || "Could not join this room.");
       setJoining(false);
       return;
     }
 
-    router.push(`/room/${room.id}`);
+    if (!session?.user?.id) localStorage.setItem("guest_name", safeName);
+    router.push(`/room/${result.roomId}`);
   }
 
   return (
@@ -116,6 +103,14 @@ export default function JoinByCodePage() {
             </p>
 
             <GuestJoinSection displayName={displayName} setDisplayName={setDisplayName} />
+
+            <label className="mt-4 block text-sm font-semibold text-gray-300">Access code</label>
+            <input
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="Required for private rooms"
+              className="mt-2 w-full rounded-lg border border-[#2a2a2a] bg-[#0b0b0b] px-3 py-2 text-white outline-none focus:border-[#7C3AED]"
+            />
 
             {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
 

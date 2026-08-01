@@ -139,7 +139,7 @@ export default function Home() {
         </div>
 
         <h1 className="animate-slide-up delay-100" style={{ fontSize: "clamp(36px, 7vw, 72px)", fontWeight: 900, lineHeight: 1.08, letterSpacing: "-2px", maxWidth: 820, marginBottom: 24 }}>
-          ⚡ Real-Time Code Collaboration<br/>
+           Real-Time Code Collaboration<br/>
           <span style={{ background: "linear-gradient(135deg,#7C3AED,#60a5fa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
             Code together instantly.
           </span>

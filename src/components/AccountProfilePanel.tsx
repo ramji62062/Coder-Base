@@ -78,6 +78,7 @@ type ProfileData = {
     github: string;
     instagram: string;
     other: string;
+    profileVisibility?: string;
   };
 };
 
@@ -103,6 +104,7 @@ export default function AccountProfilePanel() {
   const [github, setGithub] = useState("");
   const [instagram, setInstagram] = useState("");
   const [otherLink, setOtherLink] = useState("");
+  const [profileVisibility, setProfileVisibility] = useState<"public" | "private">("public");
   const [avatar, setAvatar] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,6 +130,7 @@ export default function AccountProfilePanel() {
         setGithub(data.links?.github || "");
         setInstagram(data.links?.instagram || "");
         setOtherLink(data.links?.other || "");
+        setProfileVisibility(data.links?.profileVisibility === "private" ? "private" : "public");
       } catch (err) {
         console.error(err);
       } finally {
@@ -164,7 +167,8 @@ export default function AccountProfilePanel() {
             youtube,
             github,
             instagram,
-            other: otherLink
+            other: otherLink,
+            profileVisibility
           }
         })
       });
@@ -284,6 +288,21 @@ export default function AccountProfilePanel() {
             rows={3}
             style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px", outline: "none", boxSizing: "border-box", resize: "none" }} 
           />
+        </div>
+
+        <div>
+          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Account Type</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {(["public", "private"] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => setProfileVisibility(type)}
+                style={{ padding: "9px", background: profileVisibility === type ? "#7C3AED22" : "#11111f", border: profileVisibility === type ? "1px solid #7C3AED" : "1px solid #2a2a3f", borderRadius: 8, color: profileVisibility === type ? "#c4b5fd" : "#888", cursor: "pointer", fontSize: 12, fontWeight: 800, textTransform: "capitalize" }}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>

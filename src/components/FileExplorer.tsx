@@ -14,7 +14,10 @@ export type FileItem = {
 type FileExplorerProps = {
   files: FileItem[];
   activeFile: string;
+  openFileNames?: string[];
+  expandedFolders?: string[];
   onFileSelect: (name: string) => void;
+  onFolderToggle?: (path: string, expanded: boolean) => void;
   onFileCreate: (file: FileItem) => void;
   onFileDelete: (name: string) => void;
   onFileRename: (oldName: string, newName: string) => void;
@@ -35,7 +38,10 @@ const FILE_ICONS: Record<string, string> = {
   js: "JS", jsx: "JSX", ts: "TS", tsx: "TSX",
   py: "PY", java: "JAVA", cpp: "C++", c: "C",
   go: "GO", rs: "RS", html: "HTML", css: "CSS", json: "{}",
-  md: "MD", txt: "TXT", default: "",
+  md: "MD", txt: "TXT", png: "IMG", jpg: "IMG", jpeg: "IMG",
+  gif: "IMG", webp: "IMG", svg: "IMG", ico: "IMG", pdf: "PDF",
+  doc: "DOC", docx: "DOC", mp3: "AUD", wav: "AUD", mp4: "VID", webm: "VID",
+  default: "",
 };
 
 function normalizePath(path: string) {
@@ -64,6 +70,8 @@ function getIconColor(name: string): string {
     js: "#f1e05a", jsx: "#61dafb", ts: "#3178c6", tsx: "#61dafb",
     py: "#3572A5", html: "#e34c26", css: "#563d7c", md: "#3b82f6",
     json: "#f59e0b", java: "#f97316", cpp: "#60a5fa",
+    png: "#34d399", jpg: "#34d399", jpeg: "#34d399", gif: "#34d399", webp: "#34d399", svg: "#34d399",
+    pdf: "#f87171", doc: "#60a5fa", docx: "#60a5fa", mp3: "#c084fc", wav: "#c084fc", mp4: "#fbbf24", webm: "#fbbf24",
   };
   return colors[ext] || "#858585";
 }
@@ -73,6 +81,8 @@ function getLangFromExt(name: string): string {
     js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript",
     py: "python", java: "java", cpp: "cpp", c: "c", go: "go", rs: "rust",
     html: "html", css: "css", json: "json", md: "markdown", txt: "plaintext",
+    png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
+    pdf: "pdf", doc: "document", docx: "document", mp3: "audio", wav: "audio", mp4: "video", webm: "video",
   };
   const ext = name.split(".").pop()?.toLowerCase() || "";
   return map[ext] || "plaintext";
@@ -111,6 +121,9 @@ export { getLangFromExt };
 export default function FileExplorer({
   files,
   activeFile,
+  openFileNames,
+  expandedFolders,
+  onFolderToggle,
   onFileSelect,
   onFileCreate,
   onFileDelete,
@@ -134,6 +147,20 @@ export default function FileExplorer({
 
   const existingPaths = useMemo(() => new Set(files.map(f => normalizePath(f.path || f.name))), [files]);
   const activePath = normalizePath(activeFile);
+  const visibleFiles = useMemo(() => files.filter(f => !f.isFolder), [files]);
+
+  const openFileList = useMemo(() => {
+    if (openFileNames && openFileNames.length > 0) {
+      const set = new Set(openFileNames.map(normalizePath));
+      return visibleFiles.filter(f => set.has(normalizePath(f.path || f.name)));
+    }
+    return visibleFiles.filter(f => normalizePath(f.path || f.name) === activePath);
+  }, [openFileNames, visibleFiles, activePath]);
+
+  useEffect(() => {
+    if (!expandedFolders) return;
+    setExpanded(new Set(expandedFolders.map(normalizePath)));
+  }, [expandedFolders]);
 
   const startCreate = useCallback((type: "file" | "folder", parent = selectedFolder) => {
     setCreating({ type, parent });
@@ -143,6 +170,32 @@ export default function FileExplorer({
   }, [selectedFolder]);
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+
+  const processUploadedFiles = useCallback((filesToProcess: File[], targetFolder = selectedFolder) => {
+    filesToProcess.forEach((file) => {
+      const isBinaryOrMedia = /\.(png|jpe?g|gif|webp|svg|ico|pdf|mp3|wav|ogg|mp4|webm|doc|docx)$/i.test(file.name) ||
+        file.type.startsWith("image/") || file.type.startsWith("video/") ||
+        file.type.startsWith("audio/") || file.type === "application/pdf";
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const relPath = normalizePath((file as any).webkitRelativePath || file.name);
+        const path = normalizePath([targetFolder, relPath].filter(Boolean).join("/"));
+        onFileCreate({
+          name: path,
+          path,
+          content: (event.target?.result as string) || "",
+          language: getLangFromExt(path),
+        });
+      };
+
+      if (isBinaryOrMedia) {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file);
+      }
+    });
+  }, [onFileCreate, selectedFolder]);
 
   const handleDrop = (e: React.DragEvent, targetFolder = "") => {
     e.preventDefault();
@@ -155,15 +208,9 @@ export default function FileExplorer({
       return;
     }
     const droppedFiles = Array.from(e.dataTransfer.files);
-    droppedFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const relPath = normalizePath((file as any).webkitRelativePath || file.name);
-        const path = normalizePath([targetFolder, relPath].filter(Boolean).join("/"));
-        onFileCreate({ name: path, path, content: (event.target?.result as string) || "", language: getLangFromExt(path) });
-      };
-      reader.readAsText(file);
-    });
+    if (droppedFiles.length > 0) {
+      processUploadedFiles(droppedFiles, targetFolder);
+    }
   };
 
   const handleCreateSubmit = useCallback(() => {
@@ -271,9 +318,12 @@ export default function FileExplorer({
             if (isRenaming) return;
             if (isFolder) {
               setSelectedFolder(node.fullPath);
-              setExpanded(prev => {
+              setExpanded((prev) => {
                 const next = new Set(prev);
-                next.has(node.fullPath) ? next.delete(node.fullPath) : next.add(node.fullPath);
+                const willExpand = !next.has(node.fullPath);
+                if (willExpand) next.add(node.fullPath);
+                else next.delete(node.fullPath);
+                if (onFolderToggle) onFolderToggle(node.fullPath, willExpand);
                 return next;
               });
             } else {
@@ -314,21 +364,40 @@ export default function FileExplorer({
     );
   };
 
-  const visibleFiles = files.filter(f => !f.isFolder);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
+    if (selectedFiles.length > 0) {
+      processUploadedFiles(selectedFiles, selectedFolder);
+    }
+    if (e.target) e.target.value = "";
+  };
 
   return (
     <div onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, selectedFolder)} style={{ display: "flex", flexDirection: "column", userSelect: "none", height: "100%", background: "var(--vscode-sidebar-bg)" }}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        onChange={handleFileInputChange}
+        style={{ display: "none" }}
+      />
       <div style={{ display: "flex", flexDirection: "column" }}>
         <div onClick={() => setOpenEditorsOpen(!openEditorsOpen)} style={{ height: 22, display: "flex", alignItems: "center", background: "#383838", padding: "0 4px", cursor: "pointer" }}>
           {openEditorsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginLeft: 4, flex: 1, color: "#fff" }}>Open Editors</span>
         </div>
-        {openEditorsOpen && visibleFiles.filter(f => normalizePath(f.path || f.name) === activePath).map(f => (
-          <div key={f.path || f.name} onClick={() => onFileSelect(normalizePath(f.path || f.name))} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 16px", background: "#37373d", cursor: "pointer" }}>
-            <span style={{ fontSize: 10, color: getIconColor(f.name), fontWeight: 800, width: 26 }}>{getIcon(f.name)}</span>
-            <span style={{ fontSize: 13, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{baseName(f.name)}</span>
-          </div>
-        ))}
+        {openEditorsOpen && openFileList.map(f => {
+          const itemPath = normalizePath(f.path || f.name);
+          const isActive = itemPath === activePath;
+          return (
+            <div key={itemPath} onClick={() => onFileSelect(itemPath)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 16px", background: isActive ? "rgba(255,255,255,0.12)" : "transparent", cursor: "pointer" }}>
+              <span style={{ fontSize: 10, color: getIconColor(f.name), fontWeight: 800, width: 26 }}>{getIcon(f.name)}</span>
+              <span style={{ fontSize: 13, color: isActive ? "#fff" : "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{baseName(f.name)}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", marginTop: 1, minHeight: 0 }}>
@@ -336,10 +405,25 @@ export default function FileExplorer({
           {explorerOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginLeft: 4, flex: 1, color: "#fff" }}>CODETOGETHER</span>
           <div style={{ display: "flex", gap: 6, marginRight: 4 }} onClick={e => e.stopPropagation()}>
-            {onOpenProject && <Upload size={14} className="icon-btn" onClick={onOpenProject} />}
-            {onSaveProject && <Save size={14} className="icon-btn" onClick={onSaveProject} />}
-            <FilePlus size={14} className="icon-btn" onClick={() => startCreate("file", selectedFolder)} />
-            <FolderPlus size={14} className="icon-btn" onClick={() => startCreate("folder", selectedFolder)} />
+            <span title="Upload files/media" onClick={() => fileInputRef.current?.click()} style={{ display: "inline-flex" }}>
+              <Upload size={14} className="icon-btn" />
+            </span>
+            {onOpenProject && (
+              <span title="Open local folder" onClick={onOpenProject} style={{ display: "inline-flex" }}>
+                <FolderOpen size={14} className="icon-btn" />
+              </span>
+            )}
+            {onSaveProject && (
+              <span title="Save project" onClick={onSaveProject} style={{ display: "inline-flex" }}>
+                <Save size={14} className="icon-btn" />
+              </span>
+            )}
+            <span title="New file" onClick={() => startCreate("file", selectedFolder)} style={{ display: "inline-flex" }}>
+              <FilePlus size={14} className="icon-btn" />
+            </span>
+            <span title="New folder" onClick={() => startCreate("folder", selectedFolder)} style={{ display: "inline-flex" }}>
+              <FolderPlus size={14} className="icon-btn" />
+            </span>
           </div>
         </div>
 

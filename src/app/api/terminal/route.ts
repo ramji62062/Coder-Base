@@ -150,15 +150,14 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { user, error: authError } = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json({ error: authError }, { status: 401 });
-    }
+    const { user } = await getAuthenticatedUser(req);
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
+    const userId = user?.id || clientIp;
 
     const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false } = await req.json();
 
     if (action === "start") {
-      const limit = checkRateLimit(`terminal:${user.id}`, TERMINAL_LIMIT.max, TERMINAL_LIMIT.windowMs);
+      const limit = checkRateLimit(`terminal:${userId}`, TERMINAL_LIMIT.max, TERMINAL_LIMIT.windowMs);
       if (!limit.allowed) {
         return NextResponse.json({ error: `Rate limit exceeded. Try again in ${limit.retryAfter}s.` }, { status: 429 });
       }
@@ -203,10 +202,28 @@ export async function POST(req: NextRequest) {
       }
 
       if (!execCmd || typeof execCmd !== "string") {
-        return NextResponse.json({ error: "No command or runnable code was provided." }, { status: 400 });
+        if (typeof code === "string" && language) {
+          execCmd = code;
+        } else {
+          return NextResponse.json({ error: "No command or runnable code was provided." }, { status: 400 });
+        }
       }
 
-      terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot);
+      const allowNetwork = typeof execCmd === "string" && /^\s*(npm|yarn|pnpm|npx)\b/.test(execCmd.trim());
+
+      if (typeof code === "string" && language && !terminalManager.assertDockerReady()) {
+        terminalManager.startPistonSession(runId, language, code, tmpDir, workspaceRoot);
+      } else {
+        try {
+          terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot, allowNetwork);
+        } catch (err: any) {
+          if (typeof code === "string" && language) {
+            terminalManager.startPistonSession(runId, language, code, tmpDir, workspaceRoot);
+          } else {
+            terminalManager.startPistonSession(runId, "bash", execCmd, tmpDir, workspaceRoot);
+          }
+        }
+      }
       return NextResponse.json({ sessionId: runId });
     }
 

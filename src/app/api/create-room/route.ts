@@ -15,33 +15,57 @@ const STARTER_BY_LANGUAGE: Record<string, string> = {
 
 export async function POST(request: Request) {
   try {
-    const { user, error: authError } = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: authError }, { status: 401 });
-    }
-
     const body = (await request.json()) as {
       createdBy?: string;
       roomName?: string;
       language?: string;
       files?: any[];
+      isLibrary?: boolean;
+      isPrivate?: boolean;
+      accessCode?: string;
+      category?: string;
+      description?: string;
+      authorName?: string;
     };
+
+    let creatorId = body.createdBy;
+    const { user } = await getAuthenticatedUser(request);
+    if (user) {
+      creatorId = user.id;
+    }
+
+    if (!creatorId) {
+      return NextResponse.json({ error: "createdBy or valid user session is required" }, { status: 401 });
+    }
 
     const selectedLanguage = (body.language || "javascript").toLowerCase();
     const starterCode = STARTER_BY_LANGUAGE[selectedLanguage] || STARTER_BY_LANGUAGE.javascript;
     const roomCode = generateRoomCode(6);
     const supabaseAdmin = getSupabaseAdmin();
 
+    let finalRoomName = body.roomName || "Live Coding Room";
+    if (!finalRoomName.startsWith("{") && (body.isPrivate || body.isLibrary || body.category || body.accessCode)) {
+      finalRoomName = JSON.stringify({
+        title: body.roomName || "Workspace",
+        isLibrary: Boolean(body.isLibrary),
+        isPrivate: Boolean(body.isPrivate),
+        accessCode: body.accessCode ? String(body.accessCode).trim() : "",
+        category: body.category || "Others",
+        description: body.description || "",
+        authorName: body.authorName || user?.email?.split("@")[0] || "User",
+      });
+    }
+
     const { data: room, error } = await supabaseAdmin
       .from("rooms")
       .insert({
-        name: body.roomName || "Live Coding Room",
+        name: finalRoomName,
         room_code: roomCode,
-        created_by: user.id,
+        created_by: creatorId,
         language: selectedLanguage,
         files_json: body.files || null,
         code_content: body.files ? null : starterCode,
-        is_active: true,
+        is_active: !body.isLibrary,
       })
       .select("id, room_code")
       .single();

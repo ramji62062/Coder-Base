@@ -28,7 +28,10 @@ type LeftSidebarProps = {
   onNewChatMessage?: () => void;
   files: FileItem[];
   activeFile: string;
+  openFileNames?: string[];
   onFileSelect: (name: string) => void;
+  expandedFolders?: string[];
+  onFolderToggle?: (path: string, expanded: boolean) => void;
   onFileCreate: (file: FileItem) => void;
   onFileDelete: (name: string) => void;
   onFileRename: (oldName: string, newName: string) => void;
@@ -197,6 +200,9 @@ export default function LeftSidebar(props: LeftSidebarProps) {
           <FileExplorer
             files={props.files}
             activeFile={props.activeFile}
+            openFileNames={props.openFileNames}
+            expandedFolders={props.expandedFolders}
+            onFolderToggle={props.onFolderToggle}
             onFileSelect={props.onFileSelect}
             onFileCreate={props.onFileCreate}
             onFileDelete={props.onFileDelete}

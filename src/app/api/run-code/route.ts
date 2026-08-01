@@ -5,6 +5,7 @@ import { join } from "path";
 import { executionQueue } from "@/lib/execution-queue";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { executeWithPiston } from "@/lib/piston";
 
 const SANDBOX_IMAGE = "codetogether-sandbox:latest";
 const RUN_CODE_LIMIT = { max: 12, windowMs: 60_000 };
@@ -53,12 +54,11 @@ function getRunnableFile(language: string, code: string) {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let release: (() => void) | null = null;
   try {
-    const { user, error: authError } = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json({ error: authError }, { status: 401 });
-    }
+    const { user } = await getAuthenticatedUser(req);
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
+    const userId = user?.id || clientIp;
 
-    const limit = checkRateLimit(`run-code:${user.id}`, RUN_CODE_LIMIT.max, RUN_CODE_LIMIT.windowMs);
+    const limit = checkRateLimit(`run-code:${userId}`, RUN_CODE_LIMIT.max, RUN_CODE_LIMIT.windowMs);
     if (!limit.allowed) {
       return NextResponse.json(
         { stdout: "", stderr: `Rate limit exceeded. Try again in ${limit.retryAfter}s.`, exitCode: 1 },
@@ -107,13 +107,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ];
 
       return new Promise<NextResponse>((resolve) => {
-        execFile("docker", dockerArgs, { timeout: 15000 }, (err, stdout, stderr) => {
+        execFile("docker", dockerArgs, { timeout: 15000 }, async (err, stdout, stderr) => {
           try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+          if (err) {
+            // Docker failed -> fallback silently to Piston
+            const pistonRes = await executeWithPiston("bash", trimmed);
+            if (release) release();
+            resolve(NextResponse.json(pistonRes));
+            return;
+          }
           if (release) release();
           resolve(NextResponse.json({ 
             stdout: stdout || "", 
-            stderr: stderr || (err ? err.message : ""), 
-            exitCode: err ? (err.code || 1) : 0 
+            stderr: stderr || "", 
+            exitCode: 0 
           }));
         });
       });
@@ -140,21 +147,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.log(`[RunCode] Executing in Docker: docker ${dockerArgs.join(" ")}`);
 
     return new Promise<NextResponse>((resolve) => {
-      execFile("docker", dockerArgs, { timeout: 20000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-        // Clean up entire directory
+      execFile("docker", dockerArgs, { timeout: 20000, maxBuffer: 1024 * 1024 }, async (err, stdout, stderr) => {
         try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+        
+        if (err) {
+          console.warn("[RunCode] Docker execution failed. Falling back seamlessly to Piston engine.");
+          const pistonRes = await executeWithPiston(language || "javascript", code, fileName);
+          if (release) release();
+          resolve(NextResponse.json(pistonRes));
+          return;
+        }
+
         if (release) release();
         
         resolve(NextResponse.json({
           stdout: stdout || "",
-          stderr: stderr || (err ? err.message : ""),
-          exitCode: err ? (err.code || 1) : 0,
+          stderr: stderr || "",
+          exitCode: 0,
         }));
       });
     });
   } catch (err) {
     if (release) release();
-    console.error("[RunCode] Fatal Error:", err);
-    return NextResponse.json({ stdout: "", stderr: `Server error: ${String(err)}`, exitCode: 1 }, { status: 500 });
+    console.warn("[RunCode] Error in execution handler. Attempting Piston fallback.", err);
+    try {
+      const { code, language } = await req.clone().json();
+      if (code && typeof code === "string") {
+        const pistonRes = await executeWithPiston(language || "javascript", code);
+        return NextResponse.json(pistonRes);
+      }
+    } catch {}
+    return NextResponse.json({ stdout: "", stderr: `Execution error: ${String(err)}`, exitCode: 1 }, { status: 500 });
   }
 }

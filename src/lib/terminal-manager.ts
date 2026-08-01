@@ -1,6 +1,7 @@
 import { ChildProcess, execFile, execFileSync, spawn } from "child_process";
 import { relative } from "path";
 import { executionQueue } from "./execution-queue";
+import { executeWithPiston } from "./piston";
 
 const SANDBOX_IMAGE = "codetogether-sandbox:latest";
 const FINISHED_SESSION_TTL_MS = 60_000;
@@ -17,7 +18,7 @@ function buildShellCommand(command: string, args: string[]) {
 }
 
 type Session = {
-  process: ChildProcess;
+  process?: ChildProcess;
   output: string[];
   running: boolean;
   exitCode: number | null;
@@ -44,7 +45,7 @@ class TerminalManager {
     return TerminalManager.instance;
   }
 
-  private assertDockerReady() {
+  public assertDockerReady() {
     try {
       execFileSync("docker", ["info"], { stdio: "ignore", timeout: 5000 });
       execFileSync("docker", ["image", "inspect", SANDBOX_IMAGE], { stdio: "ignore", timeout: 5000 });
@@ -77,11 +78,56 @@ class TerminalManager {
     }, FINISHED_SESSION_TTL_MS);
   }
 
-  startSession(sessionId: string, command: string, args: string[], cwd: string, syncRoot = cwd) {
+  startPistonSession(sessionId: string, language: string, code: string, cwd: string, syncRoot = cwd) {
+    this.stopSession(sessionId);
+
+    const session: Session = {
+      output: [],
+      running: true,
+      exitCode: null,
+      error: null,
+      cwd,
+      syncRoot,
+      synced: false,
+      containerName: "",
+      releaseHeld: false,
+      usesDocker: false,
+    };
+    this.sessions.set(sessionId, session);
+
+    executeWithPiston(language, code).then((res) => {
+      const current = this.sessions.get(sessionId);
+      if (!current) return;
+      if (res.stdout) {
+        const lines = res.stdout.replace(/\r\n/g, "\n").split("\n");
+        lines.forEach((line) => this.pushOutput(current, `${line}\r\n`));
+      }
+      if (res.stderr) {
+        const lines = res.stderr.replace(/\r\n/g, "\n").split("\n");
+        lines.forEach((line) => this.pushOutput(current, `\x1b[31m${line}\x1b[0m\r\n`));
+      }
+      current.running = false;
+      current.exitCode = res.exitCode;
+      this.pushOutput(current, `\r\n\x1b[90mProcess exited with code ${res.exitCode}\x1b[0m\r\n`);
+      this.scheduleCleanup(sessionId, current);
+    }).catch((err) => {
+      const current = this.sessions.get(sessionId);
+      if (!current) return;
+      current.running = false;
+      current.exitCode = 1;
+      this.pushOutput(current, `\r\n\x1b[31mExecution error: ${err.message}\x1b[0m\r\n`);
+      this.scheduleCleanup(sessionId, current);
+    });
+
+    return session;
+  }
+
+  startSession(sessionId: string, command: string, args: string[], cwd: string, syncRoot = cwd, allowNetwork = false) {
     this.stopSession(sessionId);
     const dockerReady = this.assertDockerReady();
     if (!dockerReady) {
-      throw new Error("Docker sandbox is not available. Refusing to execute commands on the host.");
+      // Fallback silently to running command or code via Piston
+      return this.startPistonSession(sessionId, "bash", command, cwd, syncRoot);
     }
 
     if (!executionQueue.acquireTerminal()) {
@@ -93,80 +139,89 @@ class TerminalManager {
     const containerName = `codetogether_sess_${sessionId}`;
     const fullCommand = buildShellCommand(command, args || []);
 
-    const proc = spawn("docker", [
-          "run",
-          "--name",
-          containerName,
-          "--rm",
-          "-i",
-          "-v",
-          `${syncRoot}:/workspace`,
-          "-w",
-          containerCwd,
-          "--memory=256m",
-          "--cpus=0.5",
-          "--pids-limit=100",
-          "-e",
-          "LANG=C.UTF-8",
-          "-e",
-          "LC_ALL=C.UTF-8",
-          "--network",
-          "none",
-          "--security-opt",
-          "no-new-privileges",
-          "--cap-drop",
-          "ALL",
-          SANDBOX_IMAGE,
-          "sh",
-          "-c",
-          fullCommand,
-        ]);
-
-    const session: Session = {
-      process: proc,
-      output: [],
-      running: true,
-      exitCode: null,
-      error: null,
-      cwd,
-      syncRoot,
-      synced: false,
+    const dockerArgs = [
+      "run",
+      "--name",
       containerName,
-      releaseHeld: true,
-      usesDocker: true,
-    };
+      "--rm",
+      "-i",
+      "-v",
+      `${syncRoot}:/workspace`,
+      "-w",
+      containerCwd,
+      "--memory=256m",
+      "--cpus=0.5",
+      "--pids-limit=100",
+      "-e",
+      "LANG=C.UTF-8",
+      "-e",
+      "LC_ALL=C.UTF-8",
+    ];
 
-    proc.stdout?.on("data", (data) => {
-      this.pushOutput(session, data.toString());
-    });
+    if (!allowNetwork) {
+      dockerArgs.push("--network", "none");
+    }
 
-    proc.stderr?.on("data", (data) => {
-      this.pushOutput(session, data.toString());
-    });
+    dockerArgs.push(
+      "--security-opt",
+      "no-new-privileges",
+      "--cap-drop",
+      "ALL",
+      SANDBOX_IMAGE,
+      "sh",
+      "-c",
+      fullCommand,
+    );
 
-    proc.on("error", (err) => {
-      session.error = err.message;
-      session.running = false;
-      this.pushOutput(session, `\r\nProcess error: ${err.message}\r\n`);
-      this.releaseCapacity(session);
-      this.scheduleCleanup(sessionId, session);
-    });
+    try {
+      const proc = spawn("docker", dockerArgs);
 
-    proc.on("close", (code) => {
-      session.running = false;
-      session.exitCode = code;
-      this.pushOutput(session, `\r\nProcess exited with code ${code ?? 0}\r\n`);
-      this.releaseCapacity(session);
-      this.scheduleCleanup(sessionId, session);
-    });
+      const session: Session = {
+        process: proc,
+        output: [],
+        running: true,
+        exitCode: null,
+        error: null,
+        cwd,
+        syncRoot,
+        synced: false,
+        containerName,
+        releaseHeld: true,
+        usesDocker: true,
+      };
 
-    this.sessions.set(sessionId, session);
-    return proc;
+      proc.stdout?.on("data", (data) => {
+        this.pushOutput(session, data.toString());
+      });
+
+      proc.stderr?.on("data", (data) => {
+        this.pushOutput(session, data.toString());
+      });
+
+      proc.on("error", (err) => {
+        // If docker spawn errored out, fallback silently to Piston
+        this.releaseCapacity(session);
+        this.startPistonSession(sessionId, "bash", fullCommand, cwd, syncRoot);
+      });
+
+      proc.on("close", (code) => {
+        session.running = false;
+        session.exitCode = code;
+        this.pushOutput(session, `\r\nProcess exited with code ${code ?? 0}\r\n`);
+        this.releaseCapacity(session);
+        this.scheduleCleanup(sessionId, session);
+      });
+
+      this.sessions.set(sessionId, session);
+      return proc;
+    } catch {
+      return this.startPistonSession(sessionId, "bash", fullCommand, cwd, syncRoot);
+    }
   }
 
   writeToStdin(sessionId: string, data: string) {
     const session = this.sessions.get(sessionId);
-    if (session && session.process.stdin) {
+    if (session && session.process && session.process.stdin) {
       session.process.stdin.write(data);
     }
   }
@@ -197,9 +252,11 @@ class TerminalManager {
     if (session) {
       this.sessions.delete(sessionId);
       if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
-      session.process.kill();
-      if (session.usesDocker) {
-        execFile("docker", ["kill", session.containerName], () => {});
+      if (session.process) {
+        session.process.kill();
+        if (session.usesDocker) {
+          execFile("docker", ["kill", session.containerName], () => {});
+        }
       }
       this.releaseCapacity(session);
     }

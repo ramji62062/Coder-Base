@@ -13,6 +13,7 @@ RUN apt-get update \
     g++ \
     golang \
     default-jdk \
+    git \
     lua5.4 \
     nodejs \
     npm \
@@ -21,7 +22,7 @@ RUN apt-get update \
     python3-pip \
     ruby \
     rustc \
-  && npm install -g tsx \
+  && npm install -g tsx yarn pnpm \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
