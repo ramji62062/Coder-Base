@@ -3,10 +3,9 @@ const next = require("next");
 const { Server } = require("socket.io");
 const { createClient } = require("@supabase/supabase-js");
 
+const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.NODE_ENV === "production" ? "0.0.0.0" : (process.env.HOSTNAME || "localhost");
 
-const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME || "localhost";
 const port = Number(process.env.PORT || 3000);
 
 const app = next({ dev, hostname, port });
