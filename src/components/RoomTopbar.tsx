@@ -129,67 +129,40 @@ export default function RoomTopbar({
   return (
     <>
       {/* ── Title Bar (macOS-style) ── */}
-      <div style={{
-        height: 28,
-        background: "#3c3c3c",
-        display: "flex",
-        alignItems: "center",
-        userSelect: "none",
-        position: "relative",
-        borderBottom: "1px solid #2a2a2a",
-        flexShrink: 0,
-      }}>
+      <div className="h-[28px] bg-ct-vscode-titlebar flex items-center select-none relative border-b border-[#2a2a2a] shrink-0">
         {/* Traffic lights placeholder area */}
-        <div style={{ width: 72, display: "flex", alignItems: "center", gap: 6, paddingLeft: 12, flexShrink: 0 }}>
-          <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#ff5f57" }} />
-          <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#febc2e" }} />
-          <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#28c840" }} />
+        <div className="w-[72px] flex items-center gap-[6px] pl-[12px] shrink-0">
+          <div className="w-[12px] h-[12px] rounded-full bg-[#ff5f57]" />
+          <div className="w-[12px] h-[12px] rounded-full bg-[#febc2e]" />
+          <div className="w-[12px] h-[12px] rounded-full bg-[#28c840]" />
         </div>
 
         {/* Menu bar */}
-        <div ref={menuRef} style={{ display: "flex", alignItems: "center", gap: 0, position: "relative", zIndex: 200 }}>
+        <div ref={menuRef} className="flex items-center gap-0 relative z-[200]">
           {menus.map((menu) => (
-            <div key={menu.label} style={{ position: "relative" }}>
+            <div key={menu.label} className="relative">
               <div
                 onClick={() => setOpenMenu(openMenu === menu.label ? null : menu.label)}
                 onMouseEnter={() => { if (openMenu) setOpenMenu(menu.label); }}
-                style={{
-                  padding: "0 8px",
-                  height: 28,
-                  display: "flex",
-                  alignItems: "center",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  color: openMenu === menu.label ? "#fff" : "#ccc",
-                  background: openMenu === menu.label ? "#094771" : "transparent",
-                  userSelect: "none",
-                }}
+                className={`px-2 h-[28px] flex items-center text-[13px] cursor-pointer select-none transition-colors ${
+                  openMenu === menu.label ? "text-white bg-[#333333]" : "text-gray-300 bg-transparent hover:text-white"
+                }`}
               >
                 {menu.label}
               </div>
               {openMenu === menu.label && (
-                <div style={{
-                  position: "absolute", top: 28, left: 0,
-                  background: "#252526", border: "1px solid #454545",
-                  boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
-                  minWidth: 220, zIndex: 9999, paddingTop: 4, paddingBottom: 4,
-                }}>
+                <div className="absolute top-[28px] left-0 bg-ct-vscode-sidebar border border-[#454545] shadow-[0_4px_16px_rgba(0,0,0,0.6)] min-w-[220px] z-[9999] py-1">
                   {menu.items.map((item, i) => (
                     <div key={i}>
                       {item.divider && i > 0 && (
-                        <div style={{ height: 1, background: "#454545", margin: "4px 0" }} />
+                        <div className="h-px bg-[#454545] my-1" />
                       )}
                       <div
                         onClick={() => { item.action?.(); setOpenMenu(null); }}
-                        style={{
-                          display: "flex", justifyContent: "space-between", alignItems: "center",
-                          padding: "4px 20px", fontSize: 13, cursor: "pointer", color: "#ccc",
-                        }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#094771"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#ccc"; }}
+                        className="flex justify-between items-center px-[20px] py-1 text-[13px] cursor-pointer text-gray-300 hover:bg-[#333333] hover:text-white"
                       >
                         <span>{item.label}</span>
-                        {item.shortcut && <span style={{ opacity: 0.6, fontSize: 12, marginLeft: 24 }}>{item.shortcut}</span>}
+                        {item.shortcut && <span className="opacity-60 text-[12px] ml-6">{item.shortcut}</span>}
                       </div>
                     </div>
                   ))}
@@ -200,38 +173,44 @@ export default function RoomTopbar({
         </div>
 
         {/* Center: breadcrumb / room name */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "absolute", left: 0, right: 0, pointerEvents: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#ccc", pointerEvents: "auto" }}>
-            <Code size={13} color="#007acc" />
-            <span style={{ opacity: 0.8, maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div className="flex-1 flex items-center justify-center absolute left-0 right-0 pointer-events-none">
+          <div className="flex items-center gap-[6px] text-[12px] text-gray-300 pointer-events-auto">
+            <Code size={13} className="text-white" />
+            <span className="text-white opacity-80 max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap">
               {getRoomDisplayName(roomName)}
             </span>
-            <ChevronRight size={12} color="#555" />
-            <span style={{ opacity: 0.6 }}>{language}</span>
+            <ChevronRight size={12} className="text-gray-500" />
+            <span className="opacity-60">{language}</span>
           </div>
         </div>
 
         {/* Right: mic/cam/run/share/leave */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2, paddingRight: 8, flexShrink: 0 }}>
+        <div className="ml-auto flex items-center gap-[2px] pr-[8px] shrink-0">
           {/* Media controls */}
           <button
             onClick={onMicToggle}
             title={micOn ? "Mute" : "Unmute"}
-            style={{ width: 24, height: 24, borderRadius: 4, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: micOn ? "rgba(34,197,94,0.15)" : "transparent", color: micOn ? "#22c55e" : "#666" }}
+            className={`w-6 h-6 rounded border-none cursor-pointer flex items-center justify-center transition-colors ${
+              micOn ? "bg-green-500/15 text-green-500" : "bg-transparent text-gray-500 hover:text-gray-300"
+            }`}
           >
             {micOn ? <Mic size={13} /> : <MicOff size={13} />}
           </button>
           <button
             onClick={onCameraToggle}
             title={cameraOn ? "Stop camera" : "Start camera"}
-            style={{ width: 24, height: 24, borderRadius: 4, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: cameraOn ? "rgba(34,197,94,0.15)" : "transparent", color: cameraOn ? "#22c55e" : "#666" }}
+            className={`w-6 h-6 rounded border-none cursor-pointer flex items-center justify-center transition-colors ${
+              cameraOn ? "bg-green-500/15 text-green-500" : "bg-transparent text-gray-500 hover:text-gray-300"
+            }`}
           >
             {cameraOn ? <Video size={13} /> : <VideoOff size={13} />}
           </button>
           <button
             onClick={onScreenToggle}
             title={screenOn ? "Stop sharing" : "Share screen"}
-            style={{ width: 24, height: 24, borderRadius: 4, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", background: screenOn ? "rgba(124,58,237,0.2)" : "transparent", color: screenOn ? "#a78bfa" : "#666", marginRight: 6 }}
+            className={`w-6 h-6 rounded border-none cursor-pointer flex items-center justify-center transition-colors mr-[6px] ${
+              screenOn ? "bg-white/20 text-gray-200" : "bg-transparent text-gray-500 hover:text-gray-300"
+            }`}
           >
             <Monitor size={13} />
           </button>
@@ -240,17 +219,17 @@ export default function RoomTopbar({
           <div
             onClick={copyCode}
             title="Copy room code"
-            style={{ display: "flex", alignItems: "center", gap: 5, padding: "2px 8px", background: "#2d2d2d", border: "1px solid #454545", borderRadius: 3, cursor: "pointer", fontSize: 11, color: "#ccc", marginRight: 4 }}
+            className="flex items-center gap-[5px] px-[8px] py-[2px] bg-[#2d2d2d] border border-[#454545] rounded-[3px] cursor-pointer text-[11px] text-gray-300 mr-1 hover:border-gray-400 transition-colors"
           >
-            <span style={{ opacity: 0.5 }}>🔑</span>
-            <span style={{ fontFamily: "monospace", letterSpacing: 1 }}>{roomCode || roomId.slice(0, 8)}</span>
-            <Copy size={10} style={{ opacity: 0.5 }} />
+            <span className="opacity-50">🔑</span>
+            <span className="font-mono tracking-wider">{roomCode || roomId.slice(0, 8)}</span>
+            <Copy size={10} className="opacity-50" />
           </div>
 
           {/* Run */}
           <button
             onClick={onRunCode}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#2ea043", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+            className="flex items-center gap-[4px] px-[10px] py-[3px] bg-[#2ea043] border-none rounded-[3px] text-white text-[11px] font-semibold cursor-pointer hover:bg-[#2c973e] transition-colors"
           >
             <Play size={11} fill="white" /> Run
           </button>
@@ -258,15 +237,18 @@ export default function RoomTopbar({
           {/* Preview */}
           <button
             onClick={onPreview}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#2563eb", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, fontWeight: 600, cursor: onPreview ? "pointer" : "not-allowed", opacity: onPreview ? 1 : 0.5 }}
+            disabled={!onPreview}
+            className={`flex items-center gap-[4px] px-[10px] py-[3px] bg-white border-none rounded-[3px] text-black text-[11px] font-semibold transition-opacity ${
+              onPreview ? "cursor-pointer hover:bg-gray-200 opacity-100" : "cursor-not-allowed opacity-50"
+            }`}
           >
-            <Eye size={11} fill="white" /> Preview
+            <Eye size={11} fill="black" /> Preview
           </button>
 
           {/* Share */}
           <button
             onClick={copyLink}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#454545", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, cursor: "pointer", marginLeft: 3 }}
+            className="flex items-center gap-[4px] px-[10px] py-[3px] bg-[#454545] border-none rounded-[3px] text-white text-[11px] cursor-pointer ml-[3px] hover:bg-[#555] transition-colors"
           >
             <Share2 size={11} /> Share
           </button>
@@ -274,7 +256,7 @@ export default function RoomTopbar({
           {/* Leave */}
           <button
             onClick={() => router.push("/dashboard")}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 10px", background: "#e81123", border: "none", borderRadius: 3, color: "#fff", fontSize: 11, cursor: "pointer", marginLeft: 3 }}
+            className="flex items-center gap-[4px] px-[10px] py-[3px] bg-[#e81123] border-none rounded-[3px] text-white text-[11px] cursor-pointer ml-[3px] hover:bg-[#c80f1e] transition-colors"
           >
             <LogOut size={11} /> Leave
           </button>

@@ -90,8 +90,50 @@ const JUDGE0_LANGUAGE_MAP: Record<string, number> = {
 };
 
 function getJavaClassName(code: string): string {
-  const match = code.match(/public\s+class\s+([A-Za-z0-9_$]+)/);
+  const match = code.match(/public\s+(?:final\s+)?class\s+([A-Za-z0-9_$]+)/) || code.match(/\bclass\s+([A-Za-z0-9_$]+)/);
   return match ? match[1] : "Main";
+}
+
+export function resolveCodeLanguage(language: string, code: string, fileName?: string): string {
+  const codeStr = code || "";
+  const ext = fileName ? fileName.split(".").pop()?.toLowerCase() : "";
+
+  // 1. Content-based signature auto-detection (handles cases like Java code pasted into main.js)
+  if (/public\s+(?:final\s+)?class\s+[A-Za-z0-9_$]+/.test(codeStr) || /public\s+static\s+void\s+main\s*\(/.test(codeStr) || /System\.out\.print/.test(codeStr)) {
+    return "java";
+  }
+  if (/#include\s+<iostream>|std::cout|std::endl|int\s+main\s*\(\s*int\s+argc/.test(codeStr)) {
+    return "cpp";
+  }
+  if (/#include\s+<stdio\.h>|printf\s*\(|int\s+main\s*\(\s*void\s*\)/.test(codeStr)) {
+    return "c";
+  }
+  if (/def\s+[a-zA-Z_]\w*\s*\(|if\s+__name__\s*==\s*['"]__main__['"]|import\s+sys/.test(codeStr) && !/console\.log|function\s+|const\s+|let\s+|var\s+/.test(codeStr)) {
+    return "python";
+  }
+  if (/fn\s+main\s*\(\s*\)|println!\s*\(/.test(codeStr)) {
+    return "rust";
+  }
+  if (/package\s+main|func\s+main\s*\(\s*\)|fmt\.Println/.test(codeStr)) {
+    return "go";
+  }
+
+  // 2. Extension map
+  if (ext) {
+    const extMap: Record<string, string> = {
+      java: "java", py: "python", cpp: "cpp", cc: "cpp", cxx: "cpp",
+      c: "c", cs: "csharp", go: "go", rs: "rust", php: "php",
+      rb: "ruby", kt: "kotlin", kts: "kotlin", swift: "swift",
+      ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+      sh: "bash", bash: "bash", html: "html", css: "css", md: "markdown"
+    };
+    if (extMap[ext]) {
+      return extMap[ext];
+    }
+  }
+
+  const norm = (language || "").toLowerCase().trim();
+  return norm || "javascript";
 }
 
 async function tryJudge0Execution(language: string, code: string): Promise<PistonResult | null> {
@@ -159,7 +201,7 @@ async function tryLocalPythonExecution(language: string, code: string): Promise<
 }
 
 export async function executeWithPiston(language: string, code: string, customFileName?: string): Promise<PistonResult> {
-  const normLang = (language || "javascript").toLowerCase().trim();
+  const normLang = resolveCodeLanguage(language, code, customFileName);
 
   // Handle non-executable content types locally rather than falling through to Piston.
   if (normLang === "html") {

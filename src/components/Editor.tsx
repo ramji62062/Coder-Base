@@ -239,13 +239,13 @@ export default function Editor(props: EditorProps) {
         {isImage ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#111", overflow: "hidden" }}>
             <div style={{ height: 36, background: "#1a1a1a", borderBottom: "1px solid #282828", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: "#34d399", fontWeight: 700 }}>🖼️ Image Preview · {props.activeFileName}</span>
+              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>🖼️ Image Preview · {props.activeFileName}</span>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button onClick={() => setImageZoom(z => Math.max(0.2, z - 0.2))} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#fff", borderRadius: 4, cursor: "pointer" }}>-</button>
-                <span style={{ fontSize: 11, color: "#7C3AED", fontWeight: 700 }}>{Math.round(imageZoom * 100)}%</span>
+                <span style={{ fontSize: 11, color: "#ffffff", fontWeight: 700 }}>{Math.round(imageZoom * 100)}%</span>
                 <button onClick={() => setImageZoom(z => Math.min(4, z + 0.2))} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#fff", borderRadius: 4, cursor: "pointer" }}>+</button>
                 <button onClick={() => setImageZoom(1)} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#888", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>Reset</button>
-                <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#34d399", border: "none", color: "#111", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download</button>
+                <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download</button>
               </div>
             </div>
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto", padding: 20, backgroundImage: "radial-gradient(#222 1px, transparent 0)", backgroundSize: "16px 16px" }}>
@@ -255,15 +255,15 @@ export default function Editor(props: EditorProps) {
         ) : isPdf ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#151515", overflow: "hidden" }}>
             <div style={{ height: 36, background: "#1a1a1a", borderBottom: "1px solid #282828", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: "#f87171", fontWeight: 700 }}>📕 PDF Document Viewer · {props.activeFileName}</span>
-              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#f87171", border: "none", color: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download PDF</button>
+              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>📕 PDF Document Viewer · {props.activeFileName}</span>
+              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download PDF</button>
             </div>
             <div style={{ flex: 1, position: "relative" }}>
               <object data={codeContent} type="application/pdf" style={{ width: "100%", height: "100%", border: "none" }}>
                 <iframe src={codeContent} style={{ width: "100%", height: "100%", border: "none" }} title="PDF Preview">
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#aaa", gap: 12 }}>
                     <p>PDF Preview available for download.</p>
-                    <button onClick={handleDownloadFile} style={{ padding: "8px 16px", background: "#f87171", color: "#fff", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>Download PDF Document</button>
+                    <button onClick={handleDownloadFile} style={{ padding: "8px 16px", background: "#ffffff", color: "#000", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>Download PDF Document</button>
                   </div>
                 </iframe>
               </object>
@@ -272,12 +272,12 @@ export default function Editor(props: EditorProps) {
         ) : isDoc ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#121216", padding: 30 }}>
             <div style={{ background: "#1a1a24", border: "1px solid #2a2a3c", borderRadius: 12, padding: 32, maxWidth: 440, width: "100%", textAlign: "center", boxShadow: "0 12px 40px rgba(0,0,0,0.4)" }}>
-              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(96,165,250,0.15)", border: "1px solid rgba(96,165,250,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>
                 📄
               </div>
               <h3 style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 8, wordBreak: "break-all" }}>{props.activeFileName.split("/").pop()}</h3>
               <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>Word Document (.doc/.docx)</p>
-              <button onClick={handleDownloadFile} style={{ width: "100%", padding: "10px 16px", background: "#60a5fa", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "background 0.2s" }}>
+              <button onClick={handleDownloadFile} style={{ width: "100%", padding: "10px 16px", background: "#ffffff", color: "#000", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "background 0.2s" }}>
                 Download & Open Document
               </button>
             </div>
@@ -285,8 +285,8 @@ export default function Editor(props: EditorProps) {
         ) : isAudio || isVideo ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#0a0a0f", overflow: "hidden" }}>
             <div style={{ height: 36, background: "#14141c", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: isVideo ? "#fae845" : "#c084fc", fontWeight: 700 }}>{isVideo ? "🎬 Video Player" : "🎵 Audio Player"} · {props.activeFileName}</span>
-              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: isVideo ? "#eab308" : "#a855f7", border: "none", color: "#fff", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download Media</button>
+              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>{isVideo ? "🎬 Video Player" : "🎵 Audio Player"} · {props.activeFileName}</span>
+              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download Media</button>
             </div>
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
               {isVideo ? (

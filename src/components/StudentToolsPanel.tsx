@@ -23,22 +23,6 @@ type StudentToolsPanelProps = {
   userId?: string;
 };
 
-const LANG_COLORS: Record<string, string> = {
-  javascript: "#f1e05a",
-  typescript: "#3178c6",
-  python: "#3572A5",
-  java: "#b07219",
-  cpp: "#f34b7d",
-  c: "#555555",
-  go: "#00ADD8",
-  rust: "#dea584",
-  html: "#e34c26",
-  css: "#563d7c",
-  shell: "#89e051",
-  php: "#4F5D95",
-  ruby: "#701516",
-};
-
 export default function StudentToolsPanel({ rooms = [], libraryRooms = [], userId = "" }: StudentToolsPanelProps) {
   const [activeTab, setActiveTab] = useState<"analytics" | "todos" | "timer">("analytics");
 
@@ -118,7 +102,6 @@ export default function StudentToolsPanel({ rooms = [], libraryRooms = [], userI
       interval = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
     } else if (timeLeft === 0) {
       setTimerRunning(false);
-      // Play a sound when done
       try {
         const audio = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
         audio.play();
@@ -133,129 +116,133 @@ export default function StudentToolsPanel({ rooms = [], libraryRooms = [], userI
   const secs = (timeLeft % 60).toString().padStart(2, "0");
 
   return (
-    <div className="glass-panel animate-slide-up" style={{ borderRadius: 20, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div className="glass-panel animate-slide-up rounded-[20px] overflow-hidden flex flex-col">
       
       {/* Header Tabs */}
-      <div style={{ display: "flex", background: "#0a0a14", borderBottom: "1px solid #1a1a2e" }}>
+      <div className="flex bg-ct-section border-b border-ct-border">
         <button 
           onClick={() => setActiveTab("analytics")}
-          style={{ flex: 1, padding: "14px 0", background: activeTab === "analytics" ? "rgba(124,58,237,0.1)" : "transparent", border: "none", borderBottom: activeTab === "analytics" ? "2px solid #7C3AED" : "2px solid transparent", color: activeTab === "analytics" ? "#fff" : "#666", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.2s" }}
+          className={`flex-1 py-3.5 bg-transparent border-none border-b-2 text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors ${
+            activeTab === "analytics" ? "bg-white/10 border-white text-white" : "border-transparent text-gray-500 hover:text-gray-300"
+          }`}
         >
           <BarChart2 size={16} /> Analytics
         </button>
         <button 
           onClick={() => setActiveTab("todos")}
-          style={{ flex: 1, padding: "14px 0", background: activeTab === "todos" ? "rgba(124,58,237,0.1)" : "transparent", border: "none", borderBottom: activeTab === "todos" ? "2px solid #7C3AED" : "2px solid transparent", color: activeTab === "todos" ? "#fff" : "#666", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.2s" }}
+          className={`flex-1 py-3.5 bg-transparent border-none border-b-2 text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors ${
+            activeTab === "todos" ? "bg-white/10 border-white text-white" : "border-transparent text-gray-500 hover:text-gray-300"
+          }`}
         >
           <ListTodo size={16} /> To-Do List
         </button>
         <button 
           onClick={() => setActiveTab("timer")}
-          style={{ flex: 1, padding: "14px 0", background: activeTab === "timer" ? "rgba(124,58,237,0.1)" : "transparent", border: "none", borderBottom: activeTab === "timer" ? "2px solid #7C3AED" : "2px solid transparent", color: activeTab === "timer" ? "#fff" : "#666", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "all 0.2s" }}
+          className={`flex-1 py-3.5 bg-transparent border-none border-b-2 text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors ${
+            activeTab === "timer" ? "bg-white/10 border-white text-white" : "border-transparent text-gray-500 hover:text-gray-300"
+          }`}
         >
           <Timer size={16} /> Focus Timer
         </button>
       </div>
 
       {/* Tab Content */}
-      <div style={{ padding: 24 }}>
+      <div className="p-6">
         
-        {/* ======================= */}
-        {/* ANALYTICS TAB           */}
-        {/* ======================= */}
+        {/* ANALYTICS TAB */}
         {activeTab === "analytics" && (
-          <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
+          <div className="animate-fade-in flex flex-col gap-5">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
               {[
-                { label: "Todo Completion", value: `${todoCompletion}%`, icon: <Target size={16} />, color: "#10b981" },
-                { label: "Active Days", value: activeDays, icon: <CalendarDays size={16} />, color: "#60a5fa" },
-                { label: "Project Files", value: totalFiles, icon: <TrendingUp size={16} />, color: "#f59e0b" },
-                { label: "Published Work", value: publishedCount, icon: <Award size={16} />, color: "#ec4899" },
+                { label: "Todo Completion", value: `${todoCompletion}%`, icon: <Target size={16} /> },
+                { label: "Active Days", value: activeDays, icon: <CalendarDays size={16} /> },
+                { label: "Project Files", value: totalFiles, icon: <TrendingUp size={16} /> },
+                { label: "Published Work", value: publishedCount, icon: <Award size={16} /> },
               ].map((stat) => (
-                <div key={stat.label} style={{ background: "#11111f", border: "1px solid #1a1a2e", borderRadius: 12, padding: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: stat.color, marginBottom: 8 }}>
+                <div key={stat.label} className="bg-ct-card-alt border border-ct-border rounded-xl p-3.5">
+                  <div className="flex items-center gap-2 text-white mb-2">
                     {stat.icon}
-                    <span style={{ fontSize: 10, color: "#777", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" }}>{stat.label}</span>
+                    <span className="text-[10px] text-gray-400 font-extrabold uppercase tracking-wider">{stat.label}</span>
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: "#fff" }}>{stat.value}</div>
+                  <div className="text-2xl font-black text-white">{stat.value}</div>
                 </div>
               ))}
             </div>
 
             <div>
-              <h3 style={{ fontSize: 14, color: "#aaa", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Workspace Activity</h3>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 120, borderBottom: "1px solid #333", paddingBottom: 8 }}>
+              <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-3">Workspace Activity</h3>
+              <div className="flex items-end gap-2 h-[120px] border-b border-ct-subtle pb-2">
                 {weekBars.map((bar) => (
-                  <div key={bar.day} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                    <div style={{ fontSize: 10, color: "#666", opacity: 0 }}>{bar.count}</div>
-                    <div className="hover-card-glow" style={{ width: "100%", maxWidth: 30, height: `${Math.max(8, (bar.count / maxWeekCount) * 100)}%`, background: "linear-gradient(180deg, #7C3AED, #4c1d95)", borderRadius: "4px 4px 0 0", position: "relative", cursor: "pointer" }}>
-                      <div className="tooltip" style={{ position: "absolute", top: -20, left: "50%", transform: "translateX(-50%)", fontSize: 10, background: "#111", padding: "2px 6px", borderRadius: 4, display: "none", zIndex: 10 }}>{bar.count} workspace{bar.count !== 1 ? "s" : ""}</div>
+                  <div key={bar.day} className="flex-1 flex flex-col items-center gap-1.5">
+                    <div className="text-[10px] text-ct-dim opacity-0">{bar.count}</div>
+                    <div className="group relative w-full max-w-[30px] rounded-t bg-gradient-to-t from-gray-700 to-white cursor-pointer transition-all hover:scale-105"
+                         style={{ height: `${Math.max(8, (bar.count / maxWeekCount) * 100)}%` }}>
+                      <div className="hidden group-hover:block absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] bg-ct-dark-black px-1.5 py-0.5 rounded z-10 whitespace-nowrap border border-gray-700 text-white">
+                        {bar.count} workspace{bar.count !== 1 ? "s" : ""}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 10, color: "#666" }}>{bar.day}</div>
+                    <div className="text-[10px] text-ct-dim">{bar.day}</div>
                   </div>
                 ))}
               </div>
-              <style>{`.hover-card-glow:hover .tooltip { display: block !important; }`}</style>
             </div>
 
             <div>
-              <h3 style={{ fontSize: 14, color: "#aaa", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Top Languages (All Time)</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3 className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-3">Top Languages (All Time)</h3>
+              <div className="flex flex-col gap-2.5">
                 {(topLanguages.length ? topLanguages : ([["javascript", 0]] as [string, number][])).map(([lang, count]) => {
                   const percent = Math.round((count / maxLanguageCount) * 100);
                   return (
-                  <div key={lang} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 12, color: "#ccc", width: 90, textTransform: "capitalize" }}>{lang}</span>
-                    <div style={{ flex: 1, height: 6, background: "#222", borderRadius: 4, overflow: "hidden" }}>
-                      <div style={{ width: `${percent}%`, height: "100%", background: LANG_COLORS[lang] || "#7C3AED", borderRadius: 4 }} />
+                  <div key={lang} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-300 w-[90px] capitalize">{lang}</span>
+                    <div className="flex-1 h-1.5 bg-[#222222] rounded overflow-hidden">
+                      <div className="h-full bg-white rounded" style={{ width: `${percent}%` }} />
                     </div>
-                    <span style={{ fontSize: 11, color: "#888", width: 34, textAlign: "right" }}>{count}</span>
+                    <span className="text-[11px] text-gray-400 w-[34px] text-right">{count}</span>
                   </div>
                 )})}
               </div>
             </div>
 
-            <div style={{ background: "#11111f", border: "1px solid #1a1a2e", borderRadius: 12, padding: 14 }}>
-              <div style={{ fontSize: 11, color: "#777", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Latest Work</div>
-              <div style={{ fontSize: 14, color: "#e0e0e0", fontWeight: 700 }}>{latestProject}</div>
+            <div className="bg-ct-card-alt border border-ct-border rounded-xl p-3.5">
+              <div className="text-[11px] text-gray-400 font-extrabold uppercase tracking-wider mb-1.5">Latest Work</div>
+              <div className="text-sm color-gray-200 font-bold text-white">{latestProject}</div>
             </div>
           </div>
         )}
 
-        {/* ======================= */}
-        {/* TO-DO LIST TAB          */}
-        {/* ======================= */}
+        {/* TO-DO LIST TAB */}
         {activeTab === "todos" && (
-          <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <form onSubmit={addTodo} style={{ display: "flex", gap: 8 }}>
+          <div className="animate-fade-in flex flex-col gap-4">
+            <form onSubmit={addTodo} className="flex gap-2">
               <input 
                 type="text" 
                 value={newTodo} 
                 onChange={e => setNewTodo(e.target.value)}
                 placeholder="What do you need to code today?"
-                style={{ flex: 1, background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "10px 14px", outline: "none" }}
+                className="flex-1 bg-ct-card-alt border border-ct-border rounded-lg text-white text-xs p-[10px_14px] outline-none focus:border-white transition-colors"
               />
               <button 
                 type="submit"
-                style={{ background: "linear-gradient(135deg, #7C3AED, #5b21b6)", border: "none", borderRadius: 8, padding: "0 14px", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                className="bg-white border-none rounded-lg px-3.5 text-black cursor-pointer flex items-center justify-center hover:bg-gray-200 transition-colors"
               >
                 <Plus size={18} />
               </button>
             </form>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto", paddingRight: 4 }}>
+            <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1">
               {todos.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "20px 0", color: "#666", fontSize: 13 }}>All caught up! Add a new task above.</div>
+                <div className="text-center py-5 text-ct-dim text-xs">All caught up! Add a new task above.</div>
               ) : (
                 todos.map(todo => (
-                  <div key={todo.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, background: "#11111f", border: "1px solid #1a1a2e", padding: "12px 14px", borderRadius: 8 }}>
-                    <button onClick={() => toggleTodo(todo.id)} style={{ background: "none", border: "none", cursor: "pointer", color: todo.completed ? "#10b981" : "#555", padding: 0, marginTop: 2 }}>
-                      {todo.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                  <div key={todo.id} className="flex items-start gap-3 bg-ct-card-alt border border-ct-border p-[12px_14px] rounded-lg">
+                    <button onClick={() => toggleTodo(todo.id)} className="bg-transparent border-none cursor-pointer text-gray-400 p-0 mt-0.5 hover:text-white">
+                      {todo.completed ? <CheckCircle2 size={18} className="text-white" /> : <Circle size={18} />}
                     </button>
-                    <div style={{ flex: 1, fontSize: 13, color: todo.completed ? "#666" : "#e0e0e0", textDecoration: todo.completed ? "line-through" : "none", lineHeight: 1.4 }}>
+                    <div className={`flex-1 text-xs leading-relaxed ${todo.completed ? "line-through text-ct-dimmer" : "text-gray-200"}`}>
                       {todo.text}
                     </div>
-                    <button onClick={() => deleteTodo(todo.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#444", padding: 0 }} onMouseOver={e => e.currentTarget.style.color = "#f47"} onMouseOut={e => e.currentTarget.style.color = "#444"}>
+                    <button onClick={() => deleteTodo(todo.id)} className="bg-transparent border-none cursor-pointer text-ct-dimmer p-0 hover:text-red-400 transition-colors">
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -265,41 +252,37 @@ export default function StudentToolsPanel({ rooms = [], libraryRooms = [], userI
           </div>
         )}
 
-        {/* ======================= */}
-        {/* FOCUS TIMER TAB         */}
-        {/* ======================= */}
+        {/* FOCUS TIMER TAB */}
         {activeTab === "timer" && (
-          <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 24, padding: "20px 0" }}>
-            <div style={{ position: "relative", width: 180, height: 180, borderRadius: "50%", background: "#11111f", border: "8px solid #1a1a2e", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: timerRunning ? "0 0 40px rgba(124,58,237,0.2)" : "none", transition: "box-shadow 0.3s" }}>
-              
-              {/* Circular Progress (Visual Hack) */}
-              <svg style={{ position: "absolute", top: -8, left: -8, width: 180, height: 180, transform: "rotate(-90deg)", pointerEvents: "none" }}>
-                <circle cx="90" cy="90" r="82" fill="none" stroke="#7C3AED" strokeWidth="8" strokeDasharray="515" strokeDashoffset={515 - (515 * (timeLeft / (DEFAULT_MINUTES * 60)))} style={{ transition: "stroke-dashoffset 1s linear" }} />
+          <div className="animate-fade-in flex flex-col items-center gap-6 py-5">
+            <div className={`relative w-[180px] h-[180px] rounded-full bg-ct-card-alt border-8 border-ct-border flex items-center justify-center transition-shadow ${
+              timerRunning ? "shadow-glow-white" : ""
+            }`}>
+              <svg className="absolute -top-2 -left-2 w-[180px] h-[180px] -rotate-90 pointer-events-none">
+                <circle cx="90" cy="90" r="82" fill="none" stroke="#ffffff" strokeWidth="8" strokeDasharray="515" strokeDashoffset={515 - (515 * (timeLeft / (DEFAULT_MINUTES * 60)))} className="transition-all duration-1000 ease-linear" />
               </svg>
 
-              <div style={{ fontSize: 42, fontWeight: 900, color: timerRunning ? "#fff" : "#aaa", fontFamily: "monospace" }}>
+              <div className={`text-4xl font-black font-mono ${timerRunning ? "text-white" : "text-gray-400"}`}>
                 {mins}:{secs}
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 16 }}>
+            <div className="flex gap-4">
               <button 
                 onClick={toggleTimer}
-                style={{ width: 48, height: 48, borderRadius: "50%", background: timerRunning ? "#333" : "linear-gradient(135deg, #7C3AED, #5b21b6)", border: "none", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "background 0.2s" }}
+                className="w-12 h-12 rounded-full bg-white border-none text-black flex items-center justify-center cursor-pointer hover:bg-gray-200 transition-colors"
               >
-                {timerRunning ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 3 }} />}
+                {timerRunning ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
               </button>
               <button 
                 onClick={resetTimer}
-                style={{ width: 48, height: 48, borderRadius: "50%", background: "#1a1a2e", border: "1px solid #333", color: "#aaa", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.2s" }}
-                onMouseOver={e => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = "#555"; }}
-                onMouseOut={e => { e.currentTarget.style.color = "#aaa"; e.currentTarget.style.borderColor = "#333"; }}
+                className="w-12 h-12 rounded-full bg-ct-card-alt border border-ct-border text-gray-400 flex items-center justify-center cursor-pointer hover:border-gray-500 hover:text-white transition-colors"
               >
                 <RotateCcw size={20} />
               </button>
             </div>
             
-            <div style={{ fontSize: 13, color: "#666", textAlign: "center" }}>
+            <div className="text-xs text-ct-dim text-center">
               {timerRunning ? "Focus mode active. Minimize distractions." : "Ready for a 25-minute Pomodoro session?"}
             </div>
           </div>

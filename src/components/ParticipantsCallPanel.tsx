@@ -6,7 +6,7 @@ import { io, type Socket } from "socket.io-client";
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, PhoneCall, AlertCircle, ChevronDown,
   ChevronUp, Maximize2, Minimize2, ScreenShare, Search, MoreHorizontal, Crown,
-  VolumeX, Trash2, UserPlus, Users, Wifi, WifiOff
+  VolumeX, Trash2, UserPlus, Users, Wifi, WifiOff, GripHorizontal, Move, Minus
 } from "lucide-react";
 
 type PresenceMember = { userId: string; name: string; avatar?: string | null };
@@ -154,6 +154,83 @@ export default function ParticipantsCallPanel({
   const [localStreamVersion, setLocalStreamVersion] = useState(0);
   const [speakingUsers, setSpeakingUsers] = useState<Record<string, boolean>>({});
   const [pinnedTile, setPinnedTile] = useState<string | null>(null);
+  const [floatingPos, setFloatingPos] = useState<{ x: number; y: number } | null>(null);
+  const [floatingSize, setFloatingSize] = useState<{ w: number; h: number }>({ w: 480, h: 330 });
+  const [isFloatingMinimized, setIsFloatingMinimized] = useState(false);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{ mouseX: number; mouseY: number; posX: number; posY: number }>({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
+  const isResizingRef = useRef(false);
+  const resizeStartRef = useRef<{ mouseX: number; mouseY: number; startW: number; startH: number }>({ mouseX: 0, mouseY: 0, startW: 480, startH: 330 });
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    if (isFullscreen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isResizingRef.current = true;
+    resizeStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      startW: floatingSize.w,
+      startH: floatingSize.h,
+    };
+
+    const handleMouseMove = (me: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const dw = me.clientX - resizeStartRef.current.mouseX;
+      const dh = me.clientY - resizeStartRef.current.mouseY;
+      const newW = Math.max(300, Math.min(window.innerWidth - 40, resizeStartRef.current.startW + dw));
+      const newH = Math.max(220, Math.min(window.innerHeight - 40, resizeStartRef.current.startH + dh));
+      setFloatingSize({ w: newW, h: newH });
+    };
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && !floatingPos) {
+      setFloatingPos({
+        x: Math.max(20, window.innerWidth - 480),
+        y: Math.max(20, window.innerHeight - 360),
+      });
+    }
+  }, [floatingPos]);
+
+  const handleDragMouseDown = (e: React.MouseEvent) => {
+    if (isFullscreen) return;
+    e.preventDefault();
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      posX: floatingPos?.x || (window.innerWidth - 480),
+      posY: floatingPos?.y || (window.innerHeight - 360),
+    };
+
+    const handleMouseMove = (me: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const dx = me.clientX - dragStartRef.current.mouseX;
+      const dy = me.clientY - dragStartRef.current.mouseY;
+      const newX = Math.max(10, Math.min(window.innerWidth - 140, dragStartRef.current.posX + dx));
+      const newY = Math.max(10, Math.min(window.innerHeight - 60, dragStartRef.current.posY + dy));
+      setFloatingPos({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   const socketRef = useRef<Socket | null>(null);
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
@@ -1102,136 +1179,254 @@ export default function ParticipantsCallPanel({
                 </div>
               )}
 
-              {/* Video grid */}
-              <div style={{
-                display: joined ? "block" : "none",
-                width: "100%",
-                height: isFullscreen ? "100vh" : 320,
-                borderRadius: isFullscreen ? 0 : 10,
-                overflow: "hidden",
-                border: isFullscreen ? "none" : "1px solid #2a2a2a",
-                background: "#0a0a0a",
-                position: isFullscreen ? "fixed" : "relative",
-                inset: isFullscreen ? 0 : undefined,
-                zIndex: isFullscreen ? 99999 : 1,
-                animation: joined ? "pcp-fadeIn 0.3s" : undefined,
-              }}>
-                {/* Participant count overlay */}
-                {isFullscreen && (
-                  <div style={{
-                    position: "absolute", top: 16, left: 16, zIndex: 100001,
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: "rgba(0,0,0,0.65)", backdropFilter: "blur(8px)",
-                    borderRadius: 8, padding: "5px 12px", color: "#fff", fontSize: 12,
-                  }}>
-                    <Users size={14} /> {totalInCall} participant{totalInCall !== 1 ? "s" : ""}
-                  </div>
-                )}
-
-                {/* Pinned view */}
-                {hasPinned ? (
-                  <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 4, padding: 4, boxSizing: "border-box" }}>
-                    <div style={{ flex: 1, minHeight: 0 }}>
-                      <VideoTile
-                        peer={tiles[0]}
-                        muted={tiles[0].socketId === "local"}
-                        isPinned
-                        onPin={() => setPinnedTile(null)}
-                        isFullscreen={isFullscreen}
-                      />
+              {/* Floating Call Overlay Window (Draggable, Minimizable, Maximizable) */}
+              {joined && (
+                isFloatingMinimized ? (
+                  /* ── Minimized Floating Call Pill ── */
+                  <div
+                    style={{
+                      position: "fixed",
+                      left: floatingPos?.x ?? 20,
+                      top: floatingPos?.y ?? 20,
+                      zIndex: 999999,
+                      background: "rgba(18, 18, 26, 0.95)",
+                      border: "1px solid rgba(124, 58, 237, 0.4)",
+                      borderRadius: 24,
+                      padding: "6px 14px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      boxShadow: "0 12px 32px rgba(0,0,0,0.75), 0 0 20px rgba(124,58,237,0.25)",
+                      backdropFilter: "blur(16px)",
+                      cursor: "move",
+                      userSelect: "none",
+                      animation: "pcp-fadeIn 0.2s ease-out",
+                    }}
+                    onMouseDown={handleDragMouseDown}
+                  >
+                    <GripHorizontal size={14} color="#94a3b8" style={{ cursor: "grab" }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 26, height: 26, borderRadius: "50%",
+                        background: "linear-gradient(135deg,#7C3AED,#5b21b6)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "#fff", fontSize: 10, fontWeight: 700,
+                        border: micOn ? "2px solid #22c55e" : "1px solid #444"
+                      }}>
+                        {currentUserName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Call</span>
+                      <span style={{ fontSize: 10, background: "#7C3AED33", color: "#c4b5fd", padding: "1px 6px", borderRadius: 10, display: "flex", alignItems: "center", gap: 3 }}>
+                        <Users size={10} /> {totalInCall}
+                      </span>
                     </div>
-                    {tiles.length > 1 && (
-                      <div style={{ display: "flex", gap: 4, height: isFullscreen ? 120 : 80, flexShrink: 0 }}>
-                        {tiles.slice(1).map((tile) => (
-                          <VideoTile
-                            key={tile.socketId}
-                            peer={tile}
-                            muted={tile.socketId === "local"}
-                            onPin={() => setPinnedTile(tile.socketId)}
-                            isFullscreen={isFullscreen}
-                          />
-                        ))}
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                      <button onClick={handleMicBtn} title={micOn ? "Mute" : "Unmute"} style={{ background: micOn ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)", border: micOn ? "1px solid #22c55e" : "1px solid #ef4444", borderRadius: 12, padding: "4px 8px", color: micOn ? "#22c55e" : "#ef4444", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                        {micOn ? <Mic size={12} /> : <MicOff size={12} />}
+                      </button>
+                      <button onClick={handleCameraBtn} title={cameraOn ? "Stop Video" : "Start Video"} style={{ background: cameraOn ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)", border: cameraOn ? "1px solid #22c55e" : "1px solid #ef4444", borderRadius: 12, padding: "4px 8px", color: cameraOn ? "#22c55e" : "#ef4444", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                        {cameraOn ? <Video size={12} /> : <VideoOff size={12} />}
+                      </button>
+                      <button onClick={() => setIsFloatingMinimized(false)} title="Maximize call window" style={{ background: "rgba(124, 58, 237, 0.2)", border: "1px solid #7C3AED", borderRadius: 12, padding: "4px 8px", color: "#c4b5fd", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                        <Maximize2 size={12} />
+                      </button>
+                      <button onClick={leaveCall} title="Leave call" style={{ background: "#ea4335", border: "none", borderRadius: 12, padding: "4px 8px", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                        <PhoneOff size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Maximized / Floating Video Grid Container Window ── */
+                  <div style={{
+                    position: isFullscreen ? "fixed" : "fixed",
+                    left: isFullscreen ? 0 : (floatingPos?.x ?? 20),
+                    top: isFullscreen ? 0 : (floatingPos?.y ?? 20),
+                    width: isFullscreen ? "100vw" : floatingSize.w,
+                    height: isFullscreen ? "100vh" : floatingSize.h,
+                    minWidth: isFullscreen ? undefined : 300,
+                    minHeight: isFullscreen ? undefined : 220,
+                    borderRadius: isFullscreen ? 0 : 14,
+                    overflow: "hidden",
+                    border: isFullscreen ? "none" : "1px solid rgba(124, 58, 237, 0.35)",
+                    background: "#0a0a0d",
+                    zIndex: 99999,
+                    boxShadow: isFullscreen ? "none" : "0 24px 64px rgba(0,0,0,0.85), 0 0 24px rgba(124,58,237,0.2)",
+                    display: "flex",
+                    flexDirection: "column",
+                    animation: "pcp-fadeIn 0.25s ease-out",
+                  }}>
+                    {/* Top Drag & Control Header */}
+                    <div
+                      onMouseDown={handleDragMouseDown}
+                      style={{
+                        height: 32,
+                        background: "rgba(18, 18, 26, 0.95)",
+                        borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+                        padding: "0 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        cursor: isFullscreen ? "default" : "move",
+                        userSelect: "none",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {!isFullscreen && <GripHorizontal size={14} color="#94a3b8" />}
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#f8fafc", letterSpacing: "0.01em" }}>
+                          CodeTogether Call ({totalInCall} participant{totalInCall !== 1 ? "s" : ""})
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button
+                          onClick={() => setIsFloatingMinimized(true)}
+                          title="Minimize to floating pill"
+                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 3, borderRadius: 4 }}
+                        >
+                          <Minus size={13} />
+                        </button>
+                        <button
+                          onClick={() => onFullscreenChange(!isFullscreen)}
+                          title={isFullscreen ? "Exit fullscreen" : "Fullscreen call view"}
+                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 3, borderRadius: 4 }}
+                        >
+                          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Video Tiles Grid */}
+                    <div style={{ flex: 1, position: "relative", minHeight: 0, overflow: "hidden" }}>
+                      {hasPinned ? (
+                        <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: 4, padding: 4, boxSizing: "border-box" }}>
+                          <div style={{ flex: 1, minHeight: 0 }}>
+                            <VideoTile
+                              peer={tiles[0]}
+                              muted={tiles[0].socketId === "local"}
+                              isPinned
+                              onPin={() => setPinnedTile(null)}
+                              isFullscreen={isFullscreen}
+                            />
+                          </div>
+                          {tiles.length > 1 && (
+                            <div style={{ display: "flex", gap: 4, height: isFullscreen ? 120 : 80, flexShrink: 0 }}>
+                              {tiles.slice(1).map((tile) => (
+                                <VideoTile
+                                  key={tile.socketId}
+                                  peer={tile}
+                                  muted={tile.socketId === "local"}
+                                  onPin={() => setPinnedTile(tile.socketId)}
+                                  isFullscreen={isFullscreen}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ height: "100%", display: "grid", ...gridStyle, gap: 4, padding: 4, boxSizing: "border-box" }}>
+                          {tiles.map((tile) => (
+                            <VideoTile
+                              key={tile.socketId}
+                              peer={tile}
+                              muted={tile.socketId === "local"}
+                              onPin={() => setPinnedTile(tile.socketId === pinnedTile ? null : tile.socketId)}
+                              isFullscreen={isFullscreen}
+                            />
+                          ))}
+                          {tiles.length === 0 && <div style={{ color: "#555", fontSize: 12, display: "grid", placeItems: "center" }}>Waiting for participants...</div>}
+                        </div>
+                      )}
+
+                      {/* Floating Call Controls Bar (Google Meet style) */}
+                      <div style={{
+                        position: "absolute", bottom: isFullscreen ? 24 : 10, left: "50%", transform: "translateX(-50%)",
+                        zIndex: 100000, background: "rgba(24, 24, 32, 0.94)", border: "1px solid rgba(255, 255, 255, 0.1)",
+                        padding: isFullscreen ? "8px 20px" : "6px 12px", borderRadius: 24,
+                        display: "flex", gap: isFullscreen ? 8 : 6, alignItems: "center",
+                        boxShadow: "0 8px 28px rgba(0,0,0,0.6)", backdropFilter: "blur(12px)",
+                        width: "auto", justifyContent: "center", boxSizing: "border-box",
+                        animation: "pcp-slideUp 0.3s",
+                      }}>
+                        <ControlButton
+                          onClick={handleMicBtn}
+                          active={micOn}
+                          danger={!micOn}
+                          label={micOn ? "Mute" : "Unmute"}
+                          showLabel={isFullscreen}
+                          icon={micOn ? <Mic size={isFullscreen ? 20 : 15} /> : <MicOff size={isFullscreen ? 20 : 15} />}
+                        />
+                        <ControlButton
+                          onClick={handleCameraBtn}
+                          active={cameraOn}
+                          danger={!cameraOn}
+                          label={cameraOn ? "Stop Video" : "Start Video"}
+                          showLabel={isFullscreen}
+                          icon={cameraOn ? <Video size={isFullscreen ? 20 : 15} /> : <VideoOff size={isFullscreen ? 20 : 15} />}
+                        />
+                        <ControlButton
+                          onClick={handleScreenBtn}
+                          active={screenOn}
+                          accent
+                          label={screenOn ? "Stop Share" : "Present"}
+                          showLabel={isFullscreen}
+                          icon={<ScreenShare size={isFullscreen ? 20 : 15} />}
+                        />
+
+                        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
+
+                        <ControlButton
+                          onClick={() => setIsFloatingMinimized(true)}
+                          active={false}
+                          label="Minimize"
+                          showLabel={isFullscreen}
+                          icon={<Minus size={isFullscreen ? 20 : 15} />}
+                        />
+
+                        <ControlButton
+                          onClick={() => onFullscreenChange(!isFullscreen)}
+                          active={false}
+                          label={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                          showLabel={isFullscreen}
+                          icon={isFullscreen ? <Minimize2 size={isFullscreen ? 20 : 15} /> : <Maximize2 size={isFullscreen ? 20 : 15} />}
+                        />
+
+                        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
+
+                        <button
+                          onClick={leaveCall}
+                          className="pcp-ctrl-btn"
+                          title="Leave call"
+                          style={{
+                            background: "#ea4335", color: "#fff", border: "none", cursor: "pointer",
+                            padding: isFullscreen ? "8px 20px" : "6px 14px", borderRadius: 18,
+                            fontSize: isFullscreen ? 13 : 11, fontWeight: 600,
+                            display: "flex", alignItems: "center", gap: 6,
+                          }}
+                        >
+                          <PhoneOff size={isFullscreen ? 16 : 13} />
+                          {isFullscreen && "Leave"}
+                        </button>
+                      </div>
+                    </div>
+                    {/* Bottom Right Resize Handle */}
+                    {!isFullscreen && (
+                      <div
+                        onMouseDown={handleResizeMouseDown}
+                        style={{
+                          position: "absolute", right: 3, bottom: 3, zIndex: 100002,
+                          width: 14, height: 14, cursor: "nwse-resize",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, color: "rgba(255,255,255,0.5)", userSelect: "none"
+                        }}
+                        title="Drag to resize call window"
+                      >
+                        ◢
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div style={{ height: "100%", display: "grid", ...gridStyle, gap: 4, padding: 4, boxSizing: "border-box" }}>
-                    {tiles.map((tile) => (
-                      <VideoTile
-                        key={tile.socketId}
-                        peer={tile}
-                        muted={tile.socketId === "local"}
-                        onPin={() => setPinnedTile(tile.socketId === pinnedTile ? null : tile.socketId)}
-                        isFullscreen={isFullscreen}
-                      />
-                    ))}
-                    {tiles.length === 0 && <div style={{ color: "#555", fontSize: 12, display: "grid", placeItems: "center" }}>Waiting for participants...</div>}
-                  </div>
-                )}
-
-                {/* ── Call Controls Bar (Google Meet style) ── */}
-                <div style={{
-                  position: "absolute", bottom: isFullscreen ? 24 : 10, left: "50%", transform: "translateX(-50%)",
-                  zIndex: 100000, background: "rgba(32, 33, 36, 0.94)", border: "1px solid rgba(255, 255, 255, 0.08)",
-                  padding: isFullscreen ? "8px 20px" : "6px 12px", borderRadius: 24,
-                  display: "flex", gap: isFullscreen ? 8 : 6, alignItems: "center",
-                  boxShadow: "0 8px 28px rgba(0,0,0,0.6)", backdropFilter: "blur(12px)",
-                  width: "auto", justifyContent: "center", boxSizing: "border-box",
-                  animation: "pcp-slideUp 0.3s",
-                }}>
-                  <ControlButton
-                    onClick={handleMicBtn}
-                    active={micOn}
-                    danger={!micOn}
-                    label={micOn ? "Mute" : "Unmute"}
-                    showLabel={isFullscreen}
-                    icon={micOn ? <Mic size={isFullscreen ? 20 : 16} /> : <MicOff size={isFullscreen ? 20 : 16} />}
-                  />
-                  <ControlButton
-                    onClick={handleCameraBtn}
-                    active={cameraOn}
-                    danger={!cameraOn}
-                    label={cameraOn ? "Stop Video" : "Start Video"}
-                    showLabel={isFullscreen}
-                    icon={cameraOn ? <Video size={isFullscreen ? 20 : 16} /> : <VideoOff size={isFullscreen ? 20 : 16} />}
-                  />
-                  <ControlButton
-                    onClick={handleScreenBtn}
-                    active={screenOn}
-                    accent
-                    label={screenOn ? "Stop Share" : "Present"}
-                    showLabel={isFullscreen}
-                    icon={<ScreenShare size={isFullscreen ? 20 : 16} />}
-                  />
-
-                  <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
-
-                  <ControlButton
-                    onClick={() => onFullscreenChange(!isFullscreen)}
-                    active={false}
-                    label={isFullscreen ? "Minimize" : "Fullscreen"}
-                    showLabel={isFullscreen}
-                    icon={isFullscreen ? <Minimize2 size={isFullscreen ? 20 : 16} /> : <Maximize2 size={isFullscreen ? 20 : 16} />}
-                  />
-
-                  <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
-
-                  <button
-                    onClick={leaveCall}
-                    className="pcp-ctrl-btn"
-                    title="Leave call"
-                    style={{
-                      background: "#ea4335", color: "#fff", border: "none", cursor: "pointer",
-                      padding: isFullscreen ? "8px 20px" : "6px 14px", borderRadius: 18,
-                      fontSize: isFullscreen ? 13 : 11, fontWeight: 600,
-                      display: "flex", alignItems: "center", gap: 6,
-                    }}
-                  >
-                    <PhoneOff size={isFullscreen ? 16 : 13} />
-                    {isFullscreen && "Leave"}
-                  </button>
-                </div>
-              </div>
+                )
+              )}
             </div>
           )}
         </div>
@@ -1384,7 +1579,7 @@ function VideoTile({ peer, muted, isPinned, onPin, isFullscreen }: {
           autoPlay
           playsInline
           muted={true} // Video element is always muted; audio is played via the dedicated <audio> element
-          style={{ width: "100%", height: "100%", objectFit: peer.screenOn ? "contain" : "cover", background: "#000" }}
+          style={{ width: "100%", height: "100%", objectFit: peer.screenOn ? "contain" : "cover", background: "#0a0a0a" }}
         />
       ) : (
         <div style={{
@@ -1540,49 +1735,40 @@ function MemberRow({
 
   return (
     <div
-      className="pcp-member-row"
+      className="pcp-member-row flex items-center gap-[10px] p-[8px_10px] rounded-lg border relative transition-colors"
       style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8,
-        background: isSelf ? "rgba(124,58,237,0.06)" : "rgba(255,255,255,0.02)",
-        border: `1px solid ${isSpeaking ? "rgba(34,197,94,0.4)" : isSelf ? "rgba(124,58,237,0.15)" : "#242424"}`,
-        position: "relative", animation: "pcp-slideUp 0.2s",
-        transition: "border-color 0.3s",
+        background: isSelf ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+        borderColor: isSpeaking ? "#ffffff" : isSelf ? "rgba(255,255,255,0.2)" : "#242424",
       }}
     >
       {/* Avatar */}
-      <div style={{ position: "relative", flexShrink: 0 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: "50%",
-          background: isHostParticipant ? "linear-gradient(135deg,#f59e0b,#d97706)" : getAvatarColor(name),
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 11, fontWeight: 700, color: "#fff",
-          border: isSpeaking ? "2px solid #22c55e" : "2px solid transparent",
-          transition: "border-color 0.3s",
-        }}>
+      <div className="relative shrink-0">
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-black border-2 transition-colors"
+          style={{
+            background: isHostParticipant ? "#ffffff" : getAvatarColor(name),
+            borderColor: isSpeaking ? "#ffffff" : "transparent",
+          }}
+        >
           {initials}
         </div>
         {/* Online indicator */}
         {inCall && (
-          <div style={{
-            position: "absolute", bottom: -1, right: -1,
-            width: 10, height: 10, borderRadius: "50%",
-            background: connectionState === "connected" || isSelf ? "#22c55e" : connectionState === "connecting" ? "#fbbf24" : "#22c55e",
-            border: "2px solid #151515",
-          }} />
+          <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-white border-2 border-[#151515]" />
         )}
       </div>
 
       {/* Name & Status */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: "#e5e5e5", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+      <div className="flex-1 min-w-0">
+        <div className="text-xs text-gray-200 font-semibold truncate flex items-center gap-1">
           {name}
-          {isHostParticipant && <span title="Host" style={{ display: "flex", alignItems: "center" }}><Crown size={11} color="#f59e0b" style={{ flexShrink: 0 }} /></span>}
-          {isSelf && <span style={{ fontSize: 9, opacity: 0.5, background: "rgba(255,255,255,0.08)", borderRadius: 4, padding: "0px 4px" }}>You</span>}
+          {isHostParticipant && <span title="Host" className="flex items-center"><Crown size={11} className="text-white shrink-0" /></span>}
+          {isSelf && <span className="text-[9px] opacity-50 bg-white/10 rounded px-1">You</span>}
         </div>
-        <div style={{ fontSize: 10, color: isSelf ? "#a78bfa" : inCall ? "#22c55e" : "#555", display: "flex", alignItems: "center", gap: 4 }}>
+        <div className="text-[10px] text-gray-400 flex items-center gap-1">
           {isSelf ? "You" : inCall ? "In call" : "In room"}
           {isHostParticipant && " · Host"}
-          {isSpeaking && <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 500 }}>· Speaking</span>}
+          {isSpeaking && <span className="text-[9px] text-white font-medium">· Speaking</span>}
         </div>
       </div>
 

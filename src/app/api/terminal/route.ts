@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { terminalManager } from "@/lib/terminal-manager";
+import { resolveCodeLanguage, executeWithPiston } from "@/lib/piston";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { basename, dirname, join, resolve, sep } from "path";
@@ -191,13 +192,16 @@ export async function POST(req: NextRequest) {
 
       let execCmd = command;
       const execArgs = args || [];
+      let targetFileName: string | undefined = undefined;
+      let effectiveLang = language;
 
       if (typeof code === "string" && language) {
         const preferredFileName = activeRelPath && !activeRelPath.includes("..") ? basename(activeRelPath) : undefined;
-        let runnable = getRunnableFile(language, code, preferredFileName);
-        const fileName = runnable.fileName;
-        writeFileSync(join(tmpDir, fileName), code, "utf8");
-        runnable = getRunnableFile(language, code, preferredFileName, tmpDir);
+        effectiveLang = resolveCodeLanguage(language, code, preferredFileName);
+        let runnable = getRunnableFile(effectiveLang, code, preferredFileName);
+        targetFileName = runnable.fileName;
+        writeFileSync(join(tmpDir, targetFileName), code, "utf8");
+        runnable = getRunnableFile(effectiveLang, code, preferredFileName, tmpDir);
         execCmd = runnable.execCmd;
       }
 
@@ -212,13 +216,13 @@ export async function POST(req: NextRequest) {
       const allowNetwork = typeof execCmd === "string" && /^\s*(npm|yarn|pnpm|npx)\b/.test(execCmd.trim());
 
       if (typeof code === "string" && language && !terminalManager.assertDockerReady()) {
-        terminalManager.startPistonSession(runId, language, code, tmpDir, workspaceRoot);
+        terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
       } else {
         try {
           terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot, allowNetwork);
         } catch (err: any) {
           if (typeof code === "string" && language) {
-            terminalManager.startPistonSession(runId, language, code, tmpDir, workspaceRoot);
+            terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
           } else {
             terminalManager.startPistonSession(runId, "bash", execCmd, tmpDir, workspaceRoot);
           }
@@ -242,9 +246,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(session ? { ...session, files: syncedFiles } : { output: [], running: false, exitCode: null, error: null });
     }
 
-    if (action === "stop") {
+    if (action === "stop" || action === "kill") {
       terminalManager.stopSession(sessionId);
       return NextResponse.json({ success: true });
+    }
+
+    if (action === "run-command") {
+      const limit = checkRateLimit(`terminal:${userId}`, TERMINAL_LIMIT.max, TERMINAL_LIMIT.windowMs);
+      if (!limit.allowed) {
+        return NextResponse.json({ error: `Rate limit exceeded. Try again in ${limit.retryAfter}s.` }, { status: 429 });
+      }
+
+      const cmd = String(command || "").trim();
+      if (!cmd) {
+        return NextResponse.json({ error: "No command provided." }, { status: 400 });
+      }
+
+      const result = await executeWithPiston("bash", cmd);
+      const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      return NextResponse.json({ output, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

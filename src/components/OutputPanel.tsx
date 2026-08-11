@@ -10,63 +10,27 @@ type OutputPanelProps = {
 
 export default function OutputPanel({ lines, onClear, onClose }: OutputPanelProps) {
   return (
-    <div
-      style={{
-        background: "#1e1e1e",
-        borderTop: "1px solid var(--vscode-border)",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-      }}
-    >
+    <div className="bg-[#1e1e1e] border-t border-[#3c3c3c] flex flex-col h-full min-h-0 text-gray-200">
       {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: "var(--vscode-sidebar)",
-          borderBottom: "1px solid var(--vscode-border)",
-          padding: "0 8px",
-          height: 35,
-          minHeight: 35,
-          fontSize: 12,
-        }}
-      >
-        <div style={{ display: "flex", gap: 16 }}>
-          <span style={{ color: "#fff", borderBottom: "1px solid #fff", paddingBottom: 4, cursor: "default" }}>
+      <div className="flex items-center justify-between bg-ct-vscode-sidebar border-b border-[#3c3c3c] px-2 h-[35px] min-h-[35px] text-xs">
+        <div className="flex gap-4">
+          <span className="text-white border-b border-white pb-1 cursor-default font-semibold">
             Output
           </span>
-          <span style={{ color: "#858585", paddingBottom: 4, cursor: "default" }}>Problems</span>
+          <span className="text-gray-500 pb-1 cursor-default">Problems</span>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="flex gap-2 items-center">
           <button
             onClick={onClear}
             title="Clear Output"
-            style={{
-              background: "none",
-              border: "none",
-              color: "#858585",
-              cursor: "pointer",
-              fontSize: 13,
-              padding: "2px 4px",
-            }}
+            className="bg-transparent border-none text-gray-400 cursor-pointer text-xs px-1 hover:text-white"
           >
             ⌧
           </button>
           <button
             onClick={onClose}
             title="Close Panel"
-            style={{
-              background: "none",
-              border: "none",
-              color: "#858585",
-              cursor: "pointer",
-              fontSize: 16,
-              padding: "2px 4px",
-              lineHeight: 1,
-            }}
+            className="bg-transparent border-none text-gray-400 cursor-pointer text-base px-1 leading-none hover:text-white"
           >
             ×
           </button>
@@ -74,21 +38,12 @@ export default function OutputPanel({ lines, onClear, onClose }: OutputPanelProp
       </div>
 
       {/* Output content */}
-      <div
-        style={{
-          flex: 1,
-          overflow: "auto",
-          padding: "8px 12px",
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-          fontSize: 13,
-          lineHeight: 1.6,
-        }}
-      >
+      <div className="flex-1 overflow-auto p-[8px_12px] font-mono text-[13px] leading-relaxed">
         {lines.length === 0 ? (
-          <span style={{ color: "#858585" }}>No output yet. Click ▶ Run to execute your code.</span>
+          <span className="text-gray-500">No output yet. Click ▶ Run to execute your code.</span>
         ) : (
           lines.map((line, i) => (
-            <div key={i} style={{ color: line.type === "error" ? "#f44747" : "#d4d4d4", whiteSpace: "pre-wrap" }}>
+            <div key={i} className={`whitespace-pre-wrap ${line.type === "error" ? "text-red-400" : "text-gray-300"}`}>
               {line.text}
             </div>
           ))

@@ -75,7 +75,7 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
     channelRef.current = channel;
 
     channel
-      .on("broadcast", { event: "timer-sync" }, ({ payload }) => {
+      .on("broadcast", { event: "timer-sync" }, ({ payload }: any) => {
         if (payload.senderId !== currentUserId) {
           setState(payload.state);
           setElapsed(payload.elapsed);
@@ -95,7 +95,6 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
 
     // Students request initial sync
     if (!isTeacher) {
-      // Delay slightly to ensure subscription is active
       setTimeout(() => {
         channel.send({
           type: "broadcast",
@@ -122,7 +121,7 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
     }
   }, [isTeacher, currentUserId]);
 
-  // Run timer countdown locally (runs on both sides, synced periodically by broadcast to handle drift)
+  // Run timer countdown locally
   useEffect(() => {
     if (state !== "running") return;
     const interval = setInterval(() => {
@@ -139,7 +138,7 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
     return () => clearInterval(interval);
   }, [state, limit, isTeacher, broadcastSync]);
 
-  // Periodic broadcast by teacher to keep students in sync (every 5 seconds)
+  // Periodic broadcast by teacher
   useEffect(() => {
     if (!isTeacher || state !== "running") return;
     const interval = setInterval(() => {
@@ -195,27 +194,27 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
 
   const ringR = 52, ringC = 2 * Math.PI * ringR;
   const ringOffset = ringC * (1 - pct / 100);
-  const ringColor = isExpired ? "#f44747" : isWarning ? "#ffd93d" : "#7C3AED";
+  const ringColor = isExpired ? "#ff4444" : isWarning ? "#ffd93d" : "#ffffff";
 
   return (
-    <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18, color: "#e0e0e0", height: "100%", overflowY: "auto", background: "#0d0d0d", fontFamily: "Inter, sans-serif" }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: "0.12em", display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="p-[18px] flex flex-col gap-[18px] text-gray-200 h-full overflow-y-auto bg-ct-dark-black font-inter">
+      <div className="text-[11px] font-bold text-white uppercase tracking-[0.12em] flex items-center gap-[6px]">
         <Clock size={13}/> Session Lifecycle
       </div>
 
       {/* Circular timer */}
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        <div style={{ position: "relative", width: 136, height: 136 }}>
-          <svg width="136" height="136" style={{ transform: "rotate(-90deg)" }}>
-            <circle cx="68" cy="68" r={ringR} fill="none" stroke="#1a1a2e" strokeWidth="7"/>
+      <div className="flex justify-center">
+        <div className="relative w-[136px] h-[136px]">
+          <svg width="136" height="136" className="-rotate-90">
+            <circle cx="68" cy="68" r={ringR} fill="none" stroke="#222222" strokeWidth="7"/>
             <circle cx="68" cy="68" r={ringR} fill="none" stroke={ringColor} strokeWidth="7" strokeLinecap="round"
-              strokeDasharray={ringC} strokeDashoffset={ringOffset} style={{ transition: "stroke-dashoffset 1s linear, stroke 0.5s" }}/>
+              strokeDasharray={ringC} strokeDashoffset={ringOffset} className="transition-all duration-1000 ease-linear"/>
           </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ fontSize: isExpired ? 18 : 22, fontWeight: 900, fontFamily: "monospace", color: isExpired ? "#f44747" : isWarning ? "#ffd93d" : "#fff", animation: isWarning && state === "running" ? "pulse 1.5s ease-in-out infinite" : "none" }}>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className={`font-mono font-black ${isExpired ? 'text-[18px] text-red-500' : isWarning ? 'text-[22px] text-amber-300' : 'text-[22px] text-white'} ${isWarning && state === "running" ? "animate-pulse" : ""}`}>
               {isExpired ? "DONE" : fmt(remaining)}
             </div>
-            <div style={{ fontSize: 10, color: "#555", marginTop: 3 }}>
+            <div className="text-[10px] text-gray-400 mt-[3px]">
               {state === "running" ? "remaining" : state === "paused" ? "paused" : state === "ended" ? "ended" : "ready"}
             </div>
           </div>
@@ -223,32 +222,32 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div className="grid grid-cols-2 gap-2">
         {[{ label: "Elapsed", value: fmt(elapsed) }, { label: "Duration", value: `${limit}m` }].map(s => (
-          <div key={s.label} style={{ background: "#111", borderRadius: 10, padding: "10px 12px", border: "1px solid #1a1a2e" }}>
-            <div style={{ fontSize: 10, color: "#555" }}>{s.label}</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", fontFamily: "monospace", marginTop: 2 }}>{s.value}</div>
+          <div key={s.label} className="bg-[#111111] rounded-[10px] p-[10px_12px] border border-[#222222]">
+            <div className="text-[10px] text-gray-400">{s.label}</div>
+            <div className="text-[16px] font-extrabold text-white font-mono mt-[2px]">{s.value}</div>
           </div>
         ))}
       </div>
 
       {/* Controls */}
       {isTeacher && !isScheduled && (
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="flex gap-2">
           {state === "idle" || state === "paused" ? (
-            <button onClick={() => updateState("running")} style={{ flex: 1, padding: "10px", border: "none", borderRadius: 10, background: "#7C3AED", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <button onClick={() => updateState("running")} className="flex-1 p-[10px] border-none rounded-[10px] bg-white text-black cursor-pointer font-bold text-[13px] flex items-center justify-center gap-[6px] hover:bg-gray-200 transition-colors">
               <Play size={14}/> {state === "paused" ? "Resume" : "Start"}
             </button>
           ) : state === "running" ? (
-            <button onClick={() => updateState("paused")} style={{ flex: 1, padding: "10px", border: "1px solid #ffd93d44", borderRadius: 10, background: "#ffd93d18", color: "#ffd93d", cursor: "pointer", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <button onClick={() => updateState("paused")} className="flex-1 p-[10px] border border-amber-400/30 rounded-[10px] bg-amber-400/10 text-amber-300 cursor-pointer font-bold text-[13px] flex items-center justify-center gap-[6px] hover:bg-amber-400/20 transition-colors">
               <Pause size={14}/> Pause
             </button>
           ) : null}
-          <button onClick={handleReset} style={{ padding: "10px 13px", border: "1px solid #2a2a2a", borderRadius: 10, background: "transparent", color: "#666", cursor: "pointer" }}>
+          <button onClick={handleReset} className="p-[10px_13px] border border-[#2a2a2a] rounded-[10px] bg-transparent text-gray-400 cursor-pointer hover:border-gray-500 hover:text-white transition-colors">
             <RotateCcw size={14}/>
           </button>
           {state !== "idle" && state !== "ended" && (
-            <button onClick={() => setShowEndConfirm(true)} style={{ padding: "10px 13px", border: "1px solid #f4474744", borderRadius: 10, background: "transparent", color: "#f47", cursor: "pointer" }}>
+            <button onClick={() => setShowEndConfirm(true)} className="p-[10px_13px] border border-red-500/30 rounded-[10px] bg-transparent text-red-400 cursor-pointer hover:border-red-500 hover:text-red-300 transition-colors">
               <Square size={14}/>
             </button>
           )}
@@ -258,81 +257,83 @@ export default function SessionTimer({ onSessionEnd, onSaveWork, isTeacher = fal
       {/* Duration presets */}
       {isTeacher && state === "idle" && !isScheduled && (
         <div>
-          <div style={{ fontSize: 10, color: "#555", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Session Duration</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5 }}>
+          <div className="text-[10px] text-gray-400 mb-2 uppercase tracking-wider">Session Duration</div>
+          <div className="grid grid-cols-3 gap-[5px]">
             {PRESETS.map(p => (
               <button key={p} onClick={() => handleSetLimit(p)}
-                style={{ padding: "6px", border: limit === p ? "1px solid #7C3AED" : "1px solid #222", borderRadius: 8, background: limit === p ? "#7C3AED22" : "transparent", color: limit === p ? "#c4b5fd" : "#555", cursor: "pointer", fontSize: 12, fontWeight: 700, transition: "all 0.15s" }}>
+                className={`p-[6px] rounded-[8px] cursor-pointer text-[12px] font-bold transition-all ${
+                  limit === p ? "border border-white bg-white/15 text-gray-200" : "border border-[#222222] bg-transparent text-gray-400 hover:border-gray-500"
+                }`}>
                 {p}m
               </button>
             ))}
           </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+          <div className="mt-2 flex gap-[6px]">
             <input value={customLimit} onChange={e => setCustomLimit(e.target.value)} type="number" min="1" max="480" placeholder="Custom min"
-              style={{ flex: 1, padding: "7px 10px", background: "#111", border: "1px solid #222", borderRadius: 8, color: "#ccc", fontSize: 12, outline: "none" }}/>
+              className="flex-1 p-[7px_10px] bg-[#111111] border border-[#222222] rounded-[8px] text-gray-200 text-[12px] outline-none focus:border-gray-500"/>
             <button onClick={() => { const v = parseInt(customLimit); if (v > 0) handleSetLimit(v); }}
-              style={{ padding: "7px 12px", background: "#7C3AED", border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Set</button>
+              className="p-[7px_12px] bg-white border-none rounded-[8px] text-black cursor-pointer text-[12px] font-bold hover:bg-gray-200 transition-colors">Set</button>
           </div>
         </div>
       )}
 
       {/* Progress bar */}
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#555", marginBottom: 5 }}>
+        <div className="flex justify-between text-[11px] text-gray-400 mb-[5px]">
           <span>Progress</span><span>{Math.round(pct)}%</span>
         </div>
-        <div style={{ height: 6, background: "#1a1a2e", borderRadius: 999, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg,${ringColor},${ringColor}cc)`, borderRadius: 999, transition: "width 1s linear, background 0.5s" }}/>
+        <div className="h-[6px] bg-[#222222] rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-1000 ease-linear"
+            style={{ width: `${pct}%`, backgroundColor: ringColor }}/>
         </div>
       </div>
 
       {/* Warnings */}
       {isWarning && state === "running" && (
-        <div style={{ background: "#ffd93d11", border: "1px solid #ffd93d33", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 10, alignItems: "center" }}>
-          <AlertTriangle size={15} color="#ffd93d"/>
+        <div className="bg-amber-400/10 border border-amber-400/20 rounded-[10px] p-[10px_14px] flex gap-[10px] items-center">
+          <AlertTriangle size={15} className="text-amber-300"/>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#ffd93d" }}>Session ending soon</div>
-            <div style={{ fontSize: 11, color: "#ffd93dcc", marginTop: 2 }}>Less than 5 minutes remaining</div>
+            <div className="text-[12px] font-bold text-amber-300">Session ending soon</div>
+            <div className="text-[11px] text-amber-300/80 mt-[2px]">Less than 5 minutes remaining</div>
           </div>
         </div>
       )}
 
       {state === "ended" && (
-        <div style={{ background: "#7C3AED11", border: "1px solid #7C3AED44", borderRadius: 12, padding: "14px", textAlign: "center" }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#c4b5fd", marginBottom: 6 }}>Session Ended</div>
-          <div style={{ fontSize: 12, color: "#7C3AED", marginBottom: 4 }}>Duration: {fmt(elapsed)}</div>
+        <div className="bg-white/5 border border-white/20 rounded-[12px] p-[14px] text-center">
+          <div className="text-[14px] font-extrabold text-gray-200 mb-[6px]">Session Ended</div>
+          <div className="text-[12px] text-white mb-[4px]">Duration: {fmt(elapsed)}</div>
           {workSaved && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 12, color: "#6bcb77", marginBottom: 10 }}>
+            <div className="flex items-center justify-center gap-[6px] text-[12px] text-green-400 mb-[10px]">
               <Save size={12}/> Work saved automatically
             </div>
           )}
           {isTeacher && (
             <button onClick={handleReset}
-              style={{ padding: "7px 20px", background: "#7C3AED", border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+              className="p-[7px_20px] bg-white border-none rounded-[8px] text-black cursor-pointer text-[12px] font-bold hover:bg-gray-200 transition-colors">
               New Session
             </button>
           )}
         </div>
       )}
 
-      {/* End confirmation */}
+      {/* End confirmation modal */}
       {showEndConfirm && (
-        <div style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
-          <div style={{ background: "#0d0d1a", border: "1px solid #2a2a2a", borderRadius: 20, padding: 28, maxWidth: 320, textAlign: "center", boxShadow: "0 24px 64px rgba(0,0,0,0.8)" }}>
-            <AlertTriangle size={32} color="#ffd93d" style={{ margin: "0 auto 14px" }}/>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>End Session?</div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>This will end the session for all participants.</div>
-            <div style={{ fontSize: 12, color: "#22c55e", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+        <div className="fixed inset-0 bg-ct-dark-black/80 flex items-center justify-center z-[9999]">
+          <div className="bg-ct-card border border-[#2a2a2a] rounded-[20px] p-[28px] max-w-[320px] text-center shadow-[0_24px_64px_rgba(0,0,0,0.8)]">
+            <AlertTriangle size={32} className="text-amber-300 mx-auto mb-[14px]"/>
+            <div className="font-extrabold text-[16px] mb-2 text-white">End Session?</div>
+            <div className="text-[13px] text-gray-400 mb-[6px]">This will end the session for all participants.</div>
+            <div className="text-[12px] text-green-500 mb-[20px] flex items-center justify-center gap-[5px]">
               <Save size={12}/> Work will be saved automatically
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setShowEndConfirm(false)} style={{ flex: 1, padding: "9px", border: "1px solid #222", borderRadius: 10, background: "transparent", color: "#ccc", cursor: "pointer", fontWeight: 600 }}>Cancel</button>
-              <button onClick={handleEnd} style={{ flex: 1, padding: "9px", border: "none", borderRadius: 10, background: "#f44747", color: "#fff", cursor: "pointer", fontWeight: 800 }}>End & Save</button>
+            <div className="flex gap-[10px]">
+              <button onClick={() => setShowEndConfirm(false)} className="flex-1 p-[9px] border border-[#222222] rounded-[10px] bg-transparent text-gray-300 cursor-pointer font-semibold hover:border-gray-500 transition-colors">Cancel</button>
+              <button onClick={handleEnd} className="flex-1 p-[9px] border-none rounded-[10px] bg-red-600 text-white cursor-pointer font-extrabold hover:bg-red-700 transition-colors">End & Save</button>
             </div>
           </div>
         </div>
       )}
-      <style>{`@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.5 } }`}</style>
     </div>
   );
 }

@@ -20,12 +20,12 @@ type CommunityUser = { id: string; name: string | null; email: string | null; av
 type DirectMessage = { id: string; sender_id: string; receiver_id: string; content: string; media_url?: string | null; created_at: string; edited_at?: string | null; deleted_for_sender?: boolean; deleted_for_receiver?: boolean; deleted_for_everyone?: boolean };
 
 const ROLE_CONFIG: Record<string, { icon: any; color: string; label: string; greeting: string }> = {
-  student: { icon: GraduationCap, color: "#4ade80", label: "Student", greeting: "Ready to learn?" },
-  teacher: { icon: BookOpen, color: "#60a5fa", label: "Teacher", greeting: "Your classroom awaits" },
-  youtube: { icon: Tv, color: "#f87171", label: "Creator", greeting: "Start streaming!" },
-  business: { icon: Briefcase, color: "#c084fc", label: "Business", greeting: "Build with your team" },
-  tutor: { icon: BookOpen, color: "#60a5fa", label: "Tutor", greeting: "Your students await" },
-  freelancer: { icon: Code2, color: "#f87171", label: "Freelancer", greeting: "Your next project awaits" },
+  student: { icon: GraduationCap, color: "#ffffff", label: "Student", greeting: "Ready to learn?" },
+  teacher: { icon: BookOpen, color: "#e0e0e0", label: "Teacher", greeting: "Your classroom awaits" },
+  youtube: { icon: Tv, color: "#cccccc", label: "Creator", greeting: "Start streaming!" },
+  business: { icon: Briefcase, color: "#888888", label: "Business", greeting: "Build with your team" },
+  tutor: { icon: BookOpen, color: "#e0e0e0", label: "Tutor", greeting: "Your students await" },
+  freelancer: { icon: Code2, color: "#cccccc", label: "Freelancer", greeting: "Your next project awaits" },
 };
 
 const LANGS = ["javascript","typescript","python","java","cpp","c","go","rust","html","css","shell","php","ruby","csharp","kotlin","swift","r","lua"];
@@ -115,13 +115,18 @@ function downloadProjectAsZip(projectName: string, files: any[]) {
 
 function getRoomDisplayName(roomName: string | null): string {
   if (!roomName) return "Untitled Workspace";
-  if (roomName.startsWith("{")) {
+  if (typeof roomName === "string" && roomName.startsWith("{")) {
     try {
       const parsed = JSON.parse(roomName);
-      if (parsed.title) return parsed.title;
+      if (parsed && typeof parsed === "object" && parsed.title && String(parsed.title).trim()) {
+        return String(parsed.title).trim();
+      }
     } catch {}
   }
-  return roomName;
+  if (typeof roomName === "string" && !roomName.startsWith("{")) {
+    return roomName;
+  }
+  return "Untitled Workspace";
 }
 
 function getRoomScheduleDetails(roomName: string | null) {
@@ -213,7 +218,7 @@ export default function DashboardPage() {
       .order("created_at", { ascending: false });
 
     if (data) {
-      const parsed = data.map((r) => {
+      const parsed = data.map((r: any) => {
         let meta: any = {};
         if (r.name && r.name.startsWith("{")) {
           try {
@@ -225,7 +230,7 @@ export default function DashboardPage() {
           meta = { title: r.name || "Workspace", isPrivate: false, isLibrary: false, category: "Others" };
         }
         return { ...r, meta };
-      }).filter((r) => r.meta?.isLibrary);
+      }).filter((r: any) => r.meta?.isLibrary);
       setLibraryRooms(parsed);
     }
   }, []);
@@ -568,8 +573,11 @@ export default function DashboardPage() {
 
   const cfg = ROLE_CONFIG[user?.role || "student"] || ROLE_CONFIG.student;
   const RoleIcon = cfg.icon;
-
-  const filtered = rooms.filter(r => getRoomDisplayName(r.name).toLowerCase().includes(search.toLowerCase()) || r.room_code.includes(search.toUpperCase()));
+  const userName = user?.name || "there";
+  const filtered = rooms.filter((r) =>
+    getRoomDisplayName(r.name).toLowerCase().includes(search.toLowerCase()) ||
+    r.room_code.toLowerCase().includes(search.toLowerCase())
+  );
 
   const sharedLibraryRooms = libraryRooms.filter((item) => !item.meta?.isPrivate);
   const privateLibraryRooms = libraryRooms.filter((item) => item.meta?.isPrivate);
@@ -735,18 +743,14 @@ export default function DashboardPage() {
               {/* Create room trigger card */}
               <div className="glass-panel hover-card-glow" style={{ borderRadius: 20, padding: 24, display: "flex", flexDirection: "column", gap: 12, justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#7C3AED20", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Plus size={18} color="#7C3AED"/>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Plus size={18} color="#000"/>
                   </div>
                   <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Create Workspace</h3>
                 </div>
 
-                <p style={{ fontSize: 13, color: "#888", lineHeight: 1.5, margin: 0 }}>
-                  Build public or private workspaces with custom name, language, and access code.
-                </p>
-
                 <button onClick={() => setShowCreateModal(true)}
-                  style={{ width: "100%", padding: "11px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  style={{ width: "100%", padding: "11px", background: "#fff", border: "1px solid #fff", borderRadius: 10, color: "#000", fontSize: 14, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                   <Plus size={16} /> + New Workspace
                 </button>
               </div>
@@ -754,8 +758,8 @@ export default function DashboardPage() {
               {/* Join room card */}
               <div className="glass-panel hover-card-glow" style={{ borderRadius: 20, padding: 24 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#4ade8020", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Hash size={18} color="#4ade80"/>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Hash size={18} color="#000"/>
                   </div>
                   <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Join via Code</h3>
                 </div>
@@ -769,7 +773,7 @@ export default function DashboardPage() {
                 />
                 {joinError && <p style={{ color: "#f87171", fontSize: 12, margin: "0 0 10px" }}>{joinError}</p>}
                 <button onClick={handleJoin}
-                  style={{ width: "100%", padding: "10px", background: "#4ade8020", border: "1px solid #4ade8044", borderRadius: 10, color: "#4ade80", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  style={{ width: "100%", padding: "10px", background: "#000", border: "1px solid #fff", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                   Join Room →
                 </button>
               </div>
@@ -806,7 +810,7 @@ export default function DashboardPage() {
                 <div style={{ textAlign: "center", padding: "60px 20px", background: "#0d0d1a", borderRadius: 20, border: "1px dashed #1a1a2e" }}>
                   <Layers size={40} color="#333" style={{ margin: "0 auto 16px" }}/>
                   <p style={{ color: "#555", fontSize: 15, marginBottom: 16 }}>No workspaces yet</p>
-                  <button onClick={() => setShowCreateModal(true)} style={{ padding: "10px 24px", background: "#7C3AED", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+                  <button onClick={() => setShowCreateModal(true)} style={{ padding: "10px 24px", background: "#fff", border: "1px solid #fff", borderRadius: 10, color: "#000", fontWeight: 800, cursor: "pointer" }}>
                     Create your first room
                   </button>
                 </div>
@@ -878,9 +882,9 @@ export default function DashboardPage() {
                         </div>
 
                         <button onClick={() => router.push(`/room/${room.id}`)}
-                          style={{ padding: "9px", background: "#7C3AED18", border: "1px solid #7C3AED33", borderRadius: 10, color: "#c4b5fd", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all 0.15s" }}
-                          onMouseOver={e => { (e.currentTarget as HTMLElement).style.background = "#7C3AED"; (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-                          onMouseOut={e => { (e.currentTarget as HTMLElement).style.background = "#7C3AED18"; (e.currentTarget as HTMLElement).style.color = "#c4b5fd"; }}>
+                          style={{ padding: "9px", background: "#fff", border: "1px solid #fff", borderRadius: 10, color: "#000", fontSize: 13, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all 0.15s" }}
+                          onMouseOver={e => { (e.currentTarget as HTMLElement).style.background = "#000"; (e.currentTarget as HTMLElement).style.color = "#fff"; (e.currentTarget as HTMLElement).style.borderColor = "#fff"; }}
+                          onMouseOut={e => { (e.currentTarget as HTMLElement).style.background = "#fff"; (e.currentTarget as HTMLElement).style.color = "#000"; (e.currentTarget as HTMLElement).style.borderColor = "#fff"; }}>
                           <Code2 size={14}/> Open Workspace <ArrowRight size={13}/>
                         </button>
                       </div>
@@ -951,20 +955,22 @@ export default function DashboardPage() {
                         <span style={{ fontSize: 10, background: "#7C3AED20", color: "#c4b5fd", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
                           {item.meta?.category || "Project"}
                         </span>
-                        <h3 style={{ fontWeight: 800, fontSize: 16, marginTop: 6, color: "#fff" }}>{item.meta?.title || item.name}</h3>
+                        <h3 style={{ fontWeight: 800, fontSize: 16, marginTop: 6, color: "#ffffff" }}>
+                          {getRoomDisplayName(item.meta?.title || item.name)}
+                        </h3>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                         <span style={{ width: 8, height: 8, borderRadius: "50%", background: LANG_COLORS[item.language] || "#888" }}/>
-                        <span style={{ fontSize: 12, color: "#555" }}>{item.language}</span>
+                        <span style={{ fontSize: 12, color: "#94a3b8" }}>{item.language}</span>
                       </div>
                     </div>
 
-                    <p style={{ fontSize: 13, color: "#888", lineHeight: 1.5, margin: "4px 0 8px", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", height: 38 }}>
+                    <p style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5, margin: "4px 0 8px", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", height: 38 }}>
                       {item.meta?.description || "Public workspace project with code and media files."}
                     </p>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #111", paddingTop: 10, marginTop: 4 }}>
-                      <span style={{ fontSize: 11, color: "#666" }}>by <strong style={{ color: "#ccc" }}>{item.meta?.authorName || "Anonymous"}</strong></span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #1e293b", paddingTop: 10, marginTop: 4 }}>
+                      <span style={{ fontSize: 11, color: "#94a3b8" }}>by <strong style={{ color: "#e2e8f0" }}>{item.meta?.authorName || "Anonymous"}</strong></span>
                       <span style={{ fontSize: 11, color: "#34d399", fontWeight: 700 }}>Open & Explore →</span>
                     </div>
                   </div>
@@ -1013,20 +1019,22 @@ export default function DashboardPage() {
                           <span style={{ fontSize: 10, background: isUnlocked ? "#10b98120" : "#f43f5e20", color: isUnlocked ? "#34d399" : "#f87171", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
                             {isUnlocked ? "Unlocked" : "🔒 Private"}
                           </span>
-                          <h3 style={{ fontWeight: 800, fontSize: 16, marginTop: 6, color: "#fff" }}>{item.meta?.title || item.name}</h3>
+                          <h3 style={{ fontWeight: 800, fontSize: 16, marginTop: 6, color: "#ffffff" }}>
+                            {getRoomDisplayName(item.meta?.title || item.name)}
+                          </h3>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 8, height: 8, borderRadius: "50%", background: LANG_COLORS[item.language] || "#888" }}/>
-                          <span style={{ fontSize: 12, color: "#555" }}>{item.language}</span>
+                          <span style={{ fontSize: 12, color: "#94a3b8" }}>{item.language}</span>
                         </div>
                       </div>
 
-                      <p style={{ fontSize: 13, color: "#888", lineHeight: 1.5, margin: "4px 0 8px", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", height: 38 }}>
+                      <p style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5, margin: "4px 0 8px", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", height: 38 }}>
                         {item.meta?.description || "Private workspace containing media files and source code."}
                       </p>
 
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #111", paddingTop: 10, marginTop: 4 }}>
-                        <span style={{ fontSize: 11, color: "#666" }}>by <strong style={{ color: "#ccc" }}>{item.meta?.authorName || "Anonymous"}</strong></span>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #1e293b", paddingTop: 10, marginTop: 4 }}>
+                        <span style={{ fontSize: 11, color: "#94a3b8" }}>by <strong style={{ color: "#e2e8f0" }}>{item.meta?.authorName || "Anonymous"}</strong></span>
                         <span style={{ fontSize: 12, color: isUnlocked ? "#34d399" : "#f87171", fontWeight: 700 }}>
                           {isUnlocked ? "Open Workspace →" : "Enter Passcode 🔒"}
                         </span>
@@ -1272,8 +1280,10 @@ export default function DashboardPage() {
                 <span style={{ fontSize: 10, background: "#7C3AED20", color: "#c4b5fd", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
                   {exploreItem.meta?.category || "Project"}
                 </span>
-                <span style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>{exploreItem.meta?.title}</span>
-                <span style={{ fontSize: 12, color: "#666" }}>by {exploreItem.meta?.authorName}</span>
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
+                  {getRoomDisplayName(exploreItem.meta?.title || exploreItem.name)}
+                </span>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>by {exploreItem.meta?.authorName || "Anonymous"}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
@@ -1460,7 +1470,9 @@ export default function DashboardPage() {
               <Shield size={28} color="#f87171" />
             </div>
             <h2 style={{ fontSize: 20, fontWeight: 900, color: "#fff", marginBottom: 6 }}>🔒 Private Workspace</h2>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: "#c4b5fd", marginBottom: 4 }}>{unlockingItem.meta?.title || "Private Library"}</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "#c4b5fd", marginBottom: 4 }}>
+              {getRoomDisplayName(unlockingItem.meta?.title || unlockingItem.name)}
+            </h3>
             <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>by {unlockingItem.meta?.authorName || "the owner"}</p>
             <p style={{ fontSize: 13, color: "#aaa", marginBottom: 16 }}>Enter the access code provided by the workspace owner to unlock and view the contents.</p>
 

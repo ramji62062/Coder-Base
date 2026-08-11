@@ -66,7 +66,6 @@ function Instagram({ size = 16, ...props }: { size?: number; [key: string]: any 
   );
 }
 
-
 type ProfileData = {
   name: string;
   email: string;
@@ -83,12 +82,12 @@ type ProfileData = {
 };
 
 const PRESETS = [
-  "linear-gradient(135deg, #7C3AED, #5b21b6)",
-  "linear-gradient(135deg, #ec4899, #be185d)",
-  "linear-gradient(135deg, #f59e0b, #d97706)",
-  "linear-gradient(135deg, #10b981, #047857)",
-  "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-  "linear-gradient(135deg, #8b5cf6, #ec4899)"
+  "linear-gradient(135deg, #ffffff, #888888)",
+  "linear-gradient(135deg, #cccccc, #444444)",
+  "linear-gradient(135deg, #888888, #111111)",
+  "linear-gradient(135deg, #ffffff, #333333)",
+  "linear-gradient(135deg, #e0e0e0, #666666)",
+  "linear-gradient(135deg, #aaaaaa, #222222)"
 ];
 
 export default function AccountProfilePanel() {
@@ -187,7 +186,6 @@ export default function AccountProfilePanel() {
     }
   }
 
-  // Handle custom image uploads
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -208,10 +206,9 @@ export default function AccountProfilePanel() {
 
   if (loading) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, background: "#1a1a2e", padding: 20 }}>
-        <RefreshCw size={24} className="animate-spin" color="#7C3AED" />
-        <span style={{ fontSize: 12, color: "#666" }}>Loading profile...</span>
-        <style>{`.animate-spin { animation: spin 1s linear infinite } @keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      <div className="flex flex-col items-center justify-center h-full gap-3 bg-ct-section p-5">
+        <RefreshCw size={24} className="animate-spin text-white" />
+        <span className="text-xs text-gray-400">Loading profile...</span>
       </div>
     );
   }
@@ -219,85 +216,88 @@ export default function AccountProfilePanel() {
   const isPreset = PRESETS.includes(avatar);
 
   return (
-    <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16, background: "#1e1e2f", height: "100%", overflowY: "auto", fontFamily: "Inter, sans-serif", color: "#e0e0e0" }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: "0.12em", display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="p-[16px_20px] flex flex-col gap-4 bg-ct-panel h-full overflow-y-auto font-inter text-gray-200">
+      <div className="text-[11px] font-bold text-white uppercase tracking-[0.12em] flex items-center gap-[6px]">
         <User size={13} /> Edit Profile
       </div>
 
-      <div className="animate-slide-up delay-100" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "14px 10px", background: "#11111f", borderRadius: 14, border: "1px solid #2a2a3f" }}>
-        <div style={{ position: "relative" }}>
+      <div className="animate-slide-up flex flex-col items-center gap-2.5 p-[14px_10px] bg-ct-header rounded-xl border border-ct-border">
+        <div className="relative">
           {isPreset ? (
-            <div style={{ width: 68, height: 68, borderRadius: "50%", background: avatar, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 900, color: "#fff" }}>
+            <div className="w-[68px] h-[68px] rounded-full flex items-center justify-center text-2xl font-black text-black" style={{ background: avatar }}>
               {(name || profile?.email || "U").charAt(0).toUpperCase()}
             </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatar} alt="Avatar" style={{ width: 68, height: 68, borderRadius: "50%", objectFit: "cover" }} />
+            <img src={avatar} alt="Avatar" className="w-[68px] h-[68px] rounded-full object-cover" />
           )}
           <button 
             onClick={() => fileInputRef.current?.click()}
             title="Upload profile picture"
-            style={{ position: "absolute", bottom: -2, right: -2, width: 24, height: 24, borderRadius: "50%", background: "#7C3AED", border: "2px solid #11111f", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+            className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-white border-2 border-ct-header text-black flex items-center justify-center cursor-pointer hover:bg-gray-200 transition-colors"
           >
             <Camera size={12} />
           </button>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} style={{ display: "none" }} />
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
         </div>
         
         {/* Preset list */}
-        <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-          {PRESETS.map((p, idx) => (
+        <div className="flex gap-1.5 mt-1">
+          {PRESETS.map((p) => (
             <button
               key={p}
               onClick={() => setAvatar(p)}
-              style={{
-                width: 20, height: 20, borderRadius: "50%", background: p, border: avatar === p ? "2px solid #fff" : "1.5px solid #333", cursor: "pointer", outline: "none", position: "relative"
-              }}
+              className={`w-5 h-5 rounded-full cursor-pointer outline-none relative ${
+                avatar === p ? "border-2 border-white" : "border border-gray-600"
+              }`}
+              style={{ background: p }}
             >
-              {avatar === p && <Check size={10} style={{ position: "absolute", top: 3, left: 3, color: "#fff" }} />}
+              {avatar === p && <Check size={10} className="absolute top-0.5 left-0.5 text-black" />}
             </button>
           ))}
         </div>
       </div>
 
       {/* Fields */}
-      <div className="animate-slide-up delay-200" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="animate-slide-up flex flex-col gap-3">
         <div>
-          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Display Name</label>
+          <label className="text-[10px] text-gray-400 font-bold uppercase block mb-1">Display Name</label>
           <input 
             value={name} 
             onChange={(e) => setName(e.target.value)} 
             placeholder="e.g. Ramji Kumar" 
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px", outline: "none", boxSizing: "border-box" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px] outline-none focus:border-white transition-colors box-border" 
           />
         </div>
 
         <div>
-          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Email (Read Only)</label>
-          <div style={{ width: "100%", background: "#11111f", border: "1px solid #1a1a2e", borderRadius: 8, color: "#555", fontSize: 13, padding: "8px 12px", boxSizing: "border-box" }}>
+          <label className="text-[10px] text-gray-400 font-bold uppercase block mb-1">Email (Read Only)</label>
+          <div className="w-full bg-[#111119] border border-ct-border rounded-lg text-gray-500 text-xs p-[8px_12px] box-border">
             {profile?.email}
           </div>
         </div>
 
         <div>
-          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Bio</label>
+          <label className="text-[10px] text-gray-400 font-bold uppercase block mb-1">Bio</label>
           <textarea 
             value={bio} 
             onChange={(e) => setBio(e.target.value)} 
             placeholder="Tell us about yourself..." 
             rows={3}
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px", outline: "none", boxSizing: "border-box", resize: "none" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px] outline-none focus:border-white transition-colors box-border resize-none" 
           />
         </div>
 
         <div>
-          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 6 }}>Account Type</label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <label className="text-[10px] text-gray-400 font-bold uppercase block mb-1.5">Account Type</label>
+          <div className="grid grid-cols-2 gap-2">
             {(["public", "private"] as const).map((type) => (
               <button
                 key={type}
                 onClick={() => setProfileVisibility(type)}
-                style={{ padding: "9px", background: profileVisibility === type ? "#7C3AED22" : "#11111f", border: profileVisibility === type ? "1px solid #7C3AED" : "1px solid #2a2a3f", borderRadius: 8, color: profileVisibility === type ? "#c4b5fd" : "#888", cursor: "pointer", fontSize: 12, fontWeight: 800, textTransform: "capitalize" }}
+                className={`p-[9px] rounded-lg text-xs font-extrabold capitalize cursor-pointer transition-colors ${
+                  profileVisibility === type ? "bg-white/20 border border-white text-white" : "bg-[#111119] border border-ct-border text-gray-400 hover:border-gray-500"
+                }`}
               >
                 {type}
               </button>
@@ -306,72 +306,69 @@ export default function AccountProfilePanel() {
         </div>
 
         <div>
-          <label style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block", marginBottom: 5 }}>Skills (comma separated)</label>
-          <div style={{ position: "relative" }}>
+          <label className="text-[10px] text-gray-400 font-bold uppercase block mb-1">Skills (comma separated)</label>
+          <div className="relative">
             <input 
               value={skillsText} 
               onChange={(e) => setSkillsText(e.target.value)} 
               placeholder="e.g. Next.js, Python, Figma" 
-              style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 30px 8px 12px", outline: "none", boxSizing: "border-box" }} 
+              className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_30px_8px_12px] outline-none focus:border-white transition-colors box-border" 
             />
-            <Tag size={13} style={{ position: "absolute", right: 12, top: 11, color: "#555" }} />
+            <Tag size={13} className="absolute right-3 top-2.5 text-gray-500" />
           </div>
         </div>
       </div>
 
       {/* Social Links */}
-      <div className="animate-slide-up delay-300" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-        <span style={{ fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", display: "block" }}>Social Links</span>
+      <div className="animate-slide-up flex flex-col gap-2.5 mt-1">
+        <span className="text-[10px] text-gray-400 font-bold uppercase block">Social Links</span>
         
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <input 
             value={github} 
             onChange={(e) => setGithub(e.target.value)} 
             placeholder="GitHub profile link..." 
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px 8px 32px", outline: "none", boxSizing: "border-box" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px_8px_32px] outline-none focus:border-white transition-colors box-border" 
           />
-          <Github size={13} style={{ position: "absolute", left: 10, top: 11, color: "#777" }} />
+          <Github size={13} className="absolute left-2.5 top-2.5 text-gray-400" />
         </div>
 
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <input 
             value={youtube} 
             onChange={(e) => setYoutube(e.target.value)} 
             placeholder="YouTube channel link..." 
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px 8px 32px", outline: "none", boxSizing: "border-box" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px_8px_32px] outline-none focus:border-white transition-colors box-border" 
           />
-          <Youtube size={13} style={{ position: "absolute", left: 10, top: 11, color: "#777" }} />
+          <Youtube size={13} className="absolute left-2.5 top-2.5 text-gray-400" />
         </div>
 
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <input 
             value={instagram} 
             onChange={(e) => setInstagram(e.target.value)} 
             placeholder="Instagram profile link..." 
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px 8px 32px", outline: "none", boxSizing: "border-box" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px_8px_32px] outline-none focus:border-white transition-colors box-border" 
           />
-          <Instagram size={13} style={{ position: "absolute", left: 10, top: 11, color: "#777" }} />
+          <Instagram size={13} className="absolute left-2.5 top-2.5 text-gray-400" />
         </div>
 
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <input 
             value={otherLink} 
             onChange={(e) => setOtherLink(e.target.value)} 
             placeholder="Other website or portfolio..." 
-            style={{ width: "100%", background: "#11111f", border: "1px solid #2a2a3f", borderRadius: 8, color: "#fff", fontSize: 13, padding: "8px 12px 8px 32px", outline: "none", boxSizing: "border-box" }} 
+            className="w-full bg-[#111119] border border-ct-border rounded-lg text-white text-xs p-[8px_12px_8px_32px] outline-none focus:border-white transition-colors box-border" 
           />
-          <Globe size={13} style={{ position: "absolute", left: 10, top: 11, color: "#777" }} />
+          <Globe size={13} className="absolute left-2.5 top-2.5 text-gray-400" />
         </div>
       </div>
 
       {/* Message feedback */}
       {message && (
-        <div className="animate-fade-in" style={{
-          padding: "8px 12px", borderRadius: 8, fontSize: 12, textAlign: "center",
-          background: message.type === "success" ? "#10b98120" : "#ef444420",
-          border: `1px solid ${message.type === "success" ? "#10b98144" : "#ef444444"}`,
-          color: message.type === "success" ? "#34d399" : "#f87171"
-        }}>
+        <div className={`animate-fade-in p-[8px_12px] rounded-lg text-xs text-center border ${
+          message.type === "success" ? "bg-green-500/10 border-green-500/30 text-green-400" : "bg-red-500/10 border-red-500/30 text-red-400"
+        }`}>
           {message.text}
         </div>
       )}
@@ -380,11 +377,7 @@ export default function AccountProfilePanel() {
       <button
         onClick={handleSave}
         disabled={saving}
-        style={{
-          width: "100%", padding: "10px", background: saving ? "#333" : "linear-gradient(135deg, #7C3AED, #5b21b6)",
-          border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13, cursor: saving ? "default" : "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 4, transition: "opacity 0.2s"
-        }}
+        className="w-full p-2.5 bg-gradient-to-br from-white to-gray-300 border-none rounded-lg text-black font-extrabold text-xs cursor-pointer flex items-center justify-center gap-1.5 mt-1 hover:bg-gray-200 transition-colors disabled:opacity-50"
       >
         <Save size={14} /> {saving ? "Saving..." : "Save Profile"}
       </button>

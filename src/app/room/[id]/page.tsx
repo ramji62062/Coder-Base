@@ -14,7 +14,7 @@ import BreadcrumbBar from "@/components/BreadcrumbBar";
 import { type FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 import { type RemoteCursor } from "@/components/Editor";
-import { Eye } from "lucide-react";
+import { Eye, Play } from "lucide-react";
 
 type Room = {
   id: string;
@@ -114,6 +114,88 @@ function getPreviewHtmlFile(files: FileItem[], activeFile: string) {
   return fileMap.get("index.html")
     || fileMap.get("index.htm")
     || Array.from(fileMap.values()).find((file) => file.language === "html");
+}
+
+function buildProjectPreview(files: FileItem[]): string {
+  const htmlFile = files.find(f => f.name === "index.html" || f.language === "html");
+  if (!htmlFile) {
+    return `<html><body style="font-family:sans-serif;padding:40px;background:#fff">
+      <h2>No HTML file found</h2>
+      <p>Create an index.html file to preview your project.</p>
+    </body></html>`;
+  }
+  
+  const cssFiles = files.filter(f => f.language === "css");
+  const jsFiles = files.filter(f => f.language === "javascript");
+  
+  let html = htmlFile.content || "";
+  
+  const cssMap = new Map(cssFiles.map(f => [f.name, f.content || ""]));
+  const jsMap = new Map(jsFiles.map(f => [f.name, f.content || ""]));
+  
+  html = html.replace(/<link[^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
+    if (href.endsWith(".css")) {
+      const css = cssMap.get(href) || cssMap.get(href.replace("./", ""));
+      if (css) return `<style>${css}</style>`;
+    }
+    return match;
+  });
+  
+  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+    if (src.endsWith(".js")) {
+      const js = jsMap.get(src) || jsMap.get(src.replace("./", ""));
+      if (js) return `<script>${js}</script>`;
+    }
+    return match;
+  });
+  
+  if (!/<meta[^>]*charset/i.test(html)) {
+    html = html.replace(/<head/i, '<head><meta charset="UTF-8">');
+  }
+  
+  return html;
+}
+
+function buildFolderPreview(files: FileItem[], folderName: string): string {
+  const folderFiles = files.filter(f => f.name.startsWith(folderName) || (f.path && f.path.includes(folderName)));
+  const htmlFile = folderFiles.find(f => f.language === "html");
+  
+  if (!htmlFile) {
+    return `<html><body style="font-family:sans-serif;padding:40px;background:#fff">
+      <h2>No HTML file in "${folderName}"</h2>
+      <p>Add an HTML file to this folder to preview it.</p>
+    </body></html>`;
+  }
+  
+  const cssFiles = folderFiles.filter(f => f.language === "css");
+  const jsFiles = folderFiles.filter(f => f.language === "javascript");
+  
+  let html = htmlFile.content || "";
+  
+  const cssMap = new Map(cssFiles.map(f => [f.name, f.content || ""]));
+  const jsMap = new Map(jsFiles.map(f => [f.name, f.content || ""]));
+  
+  html = html.replace(/<link[^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
+    if (href.endsWith(".css")) {
+      const css = cssMap.get(href) || cssMap.get(href.replace("./", ""));
+      if (css) return `<style>${css}</style>`;
+    }
+    return match;
+  });
+  
+  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
+    if (src.endsWith(".js")) {
+      const js = jsMap.get(src) || jsMap.get(src.replace("./", ""));
+      if (js) return `<script>${js}</script>`;
+    }
+    return match;
+  });
+  
+  if (!/<meta[^>]*charset/i.test(html)) {
+    html = html.replace(/<head/i, '<head><meta charset="UTF-8">');
+  }
+  
+  return html;
 }
 
 function buildPreviewSrcDoc(files: FileItem[], activeFile: string) {
@@ -218,6 +300,8 @@ export default function RoomPage() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [currentUserName, setCurrentUserName] = useState("User");
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const [nicknameModalOpen, setNicknameModalOpen] = useState(false);
+  const [tempNickname, setTempNickname] = useState("");
   const [language, setLanguage] = useState("javascript");
   const [roomName, setRoomName] = useState("");
   const [members, setMembers] = useState<PresenceMember[]>([]);
@@ -245,10 +329,14 @@ export default function RoomPage() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
+  const [projectPreviewUrl, setProjectPreviewUrl] = useState<string | null>(null);
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "saved">("synced");
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
   const [wordWrap, setWordWrap] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"file" | "folder" | "project">("file");
+  const [previewTarget, setPreviewTarget] = useState<string>("");
 
   // Media
   const [micOn, setMicOn] = useState(false);
@@ -379,9 +467,17 @@ export default function RoomPage() {
       if (!session?.user?.id) { router.replace("/login"); return; }
       setCurrentUserId(session.user.id);
       const { data: profile } = await supabase.from("users").select("name, email, avatar_url").eq("id", session.user.id).maybeSingle();
-      const userName = profile?.name || profile?.email || session.user.email || "User";
-      setCurrentUserName(userName);
+      const defaultName = profile?.name || (profile?.email ? profile.email.split("@")[0] : "") || (session.user.email ? session.user.email.split("@")[0] : "") || "User";
       setUserAvatar(profile?.avatar_url || null);
+
+      const storedNick = typeof window !== "undefined" ? sessionStorage.getItem(`codetogether_nickname_${roomId}`) : null;
+      if (storedNick) {
+        setCurrentUserName(storedNick);
+      } else {
+        setTempNickname(defaultName);
+        setNicknameModalOpen(true);
+        setCurrentUserName(defaultName);
+      }
 
       const { data, error: roomError } = await supabase.from("rooms")
         .select("id, name, room_code, language, code_content, files_json, created_by, is_active")
@@ -474,7 +570,7 @@ export default function RoomPage() {
       );
 
       if (typeof window !== "undefined") {
-        (window as any).currentUserDisplayPath = userName;
+        (window as any).currentUserDisplayPath = defaultName;
       }
       setLoading(false);
     }
@@ -496,15 +592,15 @@ export default function RoomPage() {
     roomChannelRef.current = channel;
     channel
       .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState<{ userId: string; name: string; avatar?: string | null }>();
+        const state = channel.presenceState();
         const next: PresenceMember[] = [];
-        Object.values(state).forEach((presences) => { const c = presences[0]; if (c) next.push({ userId: c.userId, name: c.name || "Guest", avatar: c.avatar || null }); });
+        Object.values(state).forEach((presences: any) => { const c = presences?.[0]; if (c) next.push({ userId: c.userId, name: c.name || "Guest", avatar: c.avatar || null }); });
         setMembers(next);
       })
-      .on("broadcast", { event: "language-change" }, ({ payload }) => {
+      .on("broadcast", { event: "language-change" }, ({ payload }: any) => {
         if (payload.userId !== currentUserId && payload.language) setLanguage(payload.language);
       })
-      .on("broadcast", { event: "files-update" }, ({ payload }) => {
+      .on("broadcast", { event: "files-update" }, ({ payload }: any) => {
         // Only handle structural changes (file create/delete/rename/open-project)
         // NOT code content changes (handled by code-update event)
         if (payload.userId !== currentUserId && payload.files) {
@@ -529,7 +625,7 @@ export default function RoomPage() {
           }
         }
       })
-      .on("broadcast", { event: "code-update" }, ({ payload }) => {
+      .on("broadcast", { event: "code-update" }, ({ payload }: any) => {
         // Apply remote code changes to a specific file without touching local editor
         if (payload.userId !== currentUserId && payload.file && payload.content !== undefined) {
           setFiles((prev) =>
@@ -541,7 +637,7 @@ export default function RoomPage() {
           );
         }
       })
-      .on("broadcast", { event: "project-opened" }, ({ payload }) => {
+      .on("broadcast", { event: "project-opened" }, ({ payload }: any) => {
         if (payload.userId === currentUserId) return;
         const applyProject = async () => {
           let nextFiles: FileItem[] | null = null;
@@ -572,7 +668,7 @@ export default function RoomPage() {
         };
         void applyProject();
       })
-      .on("broadcast", { event: "folder-toggle" }, ({ payload }) => {
+      .on("broadcast", { event: "folder-toggle" }, ({ payload }: any) => {
         if (payload.userId === currentUserId || !payload.folder) return;
         setExpandedFolders((prev) => {
           const next = new Set(prev);
@@ -581,7 +677,7 @@ export default function RoomPage() {
           return next;
         });
       })
-      .on("broadcast", { event: "cursor-position" }, ({ payload }) => {
+      .on("broadcast", { event: "cursor-position" }, ({ payload }: any) => {
         if (payload.userId === currentUserId || !payload.file) return;
         setRemoteCursors((prev) => ({
           ...prev,
@@ -596,13 +692,13 @@ export default function RoomPage() {
           },
         }));
       })
-      .on("broadcast", { event: "session-ended" }, ({ payload }) => {
+      .on("broadcast", { event: "session-ended" }, ({ payload }: any) => {
         if (payload.userId !== currentUserId && room?.created_by !== currentUserId) {
           addToast("This session has ended.", "error");
           router.replace("/dashboard");
         }
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: string) => {
         if (status === "SUBSCRIBED") await channel.track({ userId: currentUserId, name: currentUserName, avatar: null });
       });
     return () => { supabase.removeChannel(channel); roomChannelRef.current = null; };
@@ -796,6 +892,28 @@ export default function RoomPage() {
     }, 150);
   }, [activeFile, currentUserId]);
 
+  const handleApplyCodeToWorkspace = useCallback((code: string, fileName?: string) => {
+    const target = fileName || activeFile;
+    if (!target) {
+      handleFileCreate({ name: "main.js", content: code, language: "javascript" });
+      addToast("Created main.js with AI code!", "success");
+      return;
+    }
+    const exists = files.some((f) => normalizePath(f.path || f.name) === normalizePath(target));
+    if (!exists) {
+      handleFileCreate({ name: target, content: code, language: getLangFromPath(target) });
+      addToast(`Created ${target} with AI code!`, "success");
+      return;
+    }
+    setFiles((prev) =>
+      prev.map((f) => normalizePath(f.path || f.name) === normalizePath(target) ? { ...f, content: code } : f)
+    );
+    setModifiedFiles((prev) => new Set(prev).add(target));
+    setActiveFile(target);
+    if (!openTabs.includes(target)) setOpenTabs((prev) => [...prev, target]);
+    addToast(`Applied AI code to ${target}!`, "success");
+  }, [activeFile, files, handleFileCreate, openTabs, addToast]);
+
   const handleTabClose = useCallback((name: string) => {
     const next = openTabs.filter((t) => t !== name);
     setOpenTabs(next);
@@ -944,11 +1062,13 @@ export default function RoomPage() {
   }, [activeFile, currentUserId, currentUserName]);
   const handleSyncStatus = useCallback((status: "synced" | "syncing" | "saved") => { setSyncStatus(status); }, []);
 
-  const previewSrcDoc = useMemo(() => buildPreviewSrcDoc(files, activeFile), [files, activeFile]);
+  const selectedPreviewFile = previewTarget || activeFile;
+  const previewSrcDoc = useMemo(() => buildPreviewSrcDoc(files, selectedPreviewFile), [files, selectedPreviewFile]);
   const previewPath = useMemo(() => {
-    const htmlFile = getPreviewHtmlFile(files, activeFile);
+    const htmlFile = getPreviewHtmlFile(files, selectedPreviewFile);
     return htmlFile?.path || htmlFile?.name || "";
-  }, [files, activeFile]);
+  }, [files, selectedPreviewFile]);
+  const activeFileItem = useMemo(() => files.find((f) => normalizePath(f.path || f.name) === selectedPreviewFile), [files, selectedPreviewFile]);
 
   const handlePreviewOpen = useCallback(() => {
     setPreviewFullscreen(false);
@@ -1042,6 +1162,7 @@ export default function RoomPage() {
           onMicToggle={handleMicToggle} onCameraToggle={handleCameraToggle} onScreenToggle={handleScreenToggle}
           onAddToast={addToast}
           isCallJoined={isCallJoined} onCallJoinedChange={setIsCallJoined}
+          onApplyCode={handleApplyCodeToWorkspace}
         />
 
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
@@ -1078,6 +1199,8 @@ export default function RoomPage() {
                 triggerRun={triggerRun}
                 files={files}
                 onFilesSync={handleTerminalFilesSync}
+                onPreviewUrlChange={setProjectPreviewUrl}
+                onOutputLog={(chunk) => setTerminalLogs((prev) => [...prev.slice(-120), chunk])}
               />
             </div>
           )}
@@ -1087,42 +1210,169 @@ export default function RoomPage() {
               position: previewFullscreen ? "fixed" : "absolute",
               inset: previewFullscreen ? 0 : "24px",
               zIndex: 9999,
-              background: "rgba(15, 15, 20, 0.98)",
+              background: "#ffffff",
               display: "flex",
               flexDirection: "column",
               borderRadius: previewFullscreen ? 0 : 16,
               boxShadow: previewFullscreen ? "none" : "0 32px 80px rgba(0,0,0,0.55)",
               overflow: "hidden",
             }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#111316", borderBottom: "1px solid #2a2a38" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#1a1a2e", borderBottom: "1px solid #2a2a38" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Eye size={14} color="#fff" />
+                  <Eye size={14} color="#7C3AED" />
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Website Preview</div>
-                    <div style={{ fontSize: 11, color: "#94a3b8" }}>{previewPath || "index.html"}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>
+                      {projectPreviewUrl ? "Live Project Web Server" : previewMode === "project" ? "Full Project Preview" : previewMode === "folder" ? "Folder Preview" : "File Preview"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      {projectPreviewUrl || previewTarget || previewPath || activeFile || "No file selected"}
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {/* Preview Mode Selector */}
+                  <select
+                    value={previewMode}
+                    onChange={(e) => {
+                      setPreviewMode(e.target.value as "file" | "folder" | "project");
+                      setPreviewTarget("");
+                    }}
+                    style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer" }}
+                  >
+                    <option value="file">📄 Current File</option>
+                    <option value="folder">📁 Select Folder</option>
+                    <option value="project">🌐 Full Project</option>
+                  </select>
+                  
+                  {/* File/Folder Selector */}
+                  {previewMode === "file" && (
+                    <select
+                      value={previewTarget || activeFile || ""}
+                      onChange={(e) => setPreviewTarget(e.target.value)}
+                      style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer", maxWidth: 150 }}
+                    >
+                      {files.filter(f => !f.isFolder).map(f => (
+                        <option key={f.path || f.name} value={f.path || f.name}>{f.path || f.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {previewMode === "folder" && (
+                    <select
+                      value={previewTarget}
+                      onChange={(e) => setPreviewTarget(e.target.value)}
+                      style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer", maxWidth: 150 }}
+                    >
+                      <option value="">Select a folder...</option>
+                      {files.filter(f => f.isFolder).map(f => (
+                        <option key={f.name} value={f.name}>{f.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  
+                  <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#7C3AED22", border: "1px solid #7C3AED55", borderRadius: 6, color: "#c4b5fd", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                    <Play size={11} /> Run Code
+                  </button>
                   <button onClick={togglePreviewFullscreen} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", cursor: "pointer", fontSize: 11 }}>
                     {previewFullscreen ? "Exit Full Screen" : "Full Screen"}
                   </button>
-                  <button onClick={handlePreviewClose} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 11 }}>
+                  <button onClick={handlePreviewClose} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                     Close
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, position: "relative", background: "#0b0c11" }}>
-                {previewSrcDoc ? (
+
+              <div style={{ flex: 1, position: "relative", background: "#ffffff", display: "flex", flexDirection: "column" }}>
+                {projectPreviewUrl ? (
+                  <iframe
+                    src={projectPreviewUrl}
+                    title="Project Preview"
+                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
+                  />
+                ) : previewMode === "project" ? (
+                  <iframe
+                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={buildProjectPreview(files)}
+                    title="Full Project Preview"
+                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
+                  />
+                ) : previewMode === "folder" && previewTarget ? (
+                  <iframe
+                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={buildFolderPreview(files, previewTarget)}
+                    title="Folder Preview"
+                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
+                  />
+                ) : previewSrcDoc ? (
                   <iframe
                     sandbox="allow-scripts allow-same-origin"
                     srcDoc={previewSrcDoc}
                     title="CodeTogether Website Preview"
-                    style={{ width: "100%", height: "100%", border: "none", background: "#020204" }}
+                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
                   />
                 ) : (
-                  <div style={{ padding: 24, color: "#cbd5e1", fontSize: 13 }}>
-                    <div style={{ marginBottom: 8, fontWeight: 700 }}>No website preview available.</div>
-                    <div>Open or create an HTML file in the workspace, then click Preview again.</div>
+                  <div style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", gap: 16, overflowY: "auto" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#13131c", border: "1px solid #222234", borderRadius: 12, padding: "12px 16px" }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>
+                          📄 {activeFile || "Workspace File"} Output Preview
+                        </div>
+                        <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                          Project Language: <strong style={{ color: "#c4b5fd" }}>{currentLang}</strong> · Interactive Console & Terminal Output
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => setTerminalLogs([])} style={{ padding: "4px 10px", background: "#1e1e2d", border: "1px solid #33334d", borderRadius: 6, color: "#aaa", fontSize: 11, cursor: "pointer" }}>
+                          Clear Output
+                        </button>
+                        <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "4px 12px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          ▶ Execute Project
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Output Content */}
+                    {activeFile?.endsWith(".md") ? (
+                      <div style={{ background: "#0d0d14", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7, fontFamily: "Inter, sans-serif" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", marginBottom: 12, letterSpacing: "0.08em" }}>
+                          Markdown Document Preview
+                        </div>
+                        <div dangerouslySetInnerHTML={{
+                          __html: (activeFileItem?.content || "")
+                            .replace(/^# (.*$)/gim, '<h1 style="font-size:22px;color:#fff;margin:12px 0 6px">$1</h1>')
+                            .replace(/^## (.*$)/gim, '<h2 style="font-size:18px;color:#c4b5fd;margin:10px 0 4px">$1</h2>')
+                            .replace(/^### (.*$)/gim, '<h3 style="font-size:15px;color:#e2e8f0;margin:8px 0 4px">$1</h3>')
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/`([^`]+)`/g, '<code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;color:#c4b5fd">$1</code>')
+                            .replace(/\n/g, '<br/>')
+                        }} />
+                      </div>
+                    ) : terminalLogs.length > 0 ? (
+                      <div style={{ flex: 1, background: "#06060c", border: "1px solid #1e1e2e", borderRadius: 12, padding: 16, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, lineHeight: 1.6, color: "#e2e8f0", overflowY: "auto", maxHeight: "60vh" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#34d399" }} /> Live Console & Terminal Output Log
+                        </div>
+                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                          {terminalLogs.join("")}
+                        </pre>
+                      </div>
+                    ) : (
+                      <div style={{ background: "#0d0d14", border: "1px dashed #2a2a3c", borderRadius: 12, padding: 32, textAlign: "center", color: "#94a3b8" }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 8 }}>
+                          ⚡ Ready to Run Output Preview
+                        </div>
+                        <p style={{ fontSize: 13, color: "#888", maxWidth: 500, margin: "0 auto 16px" }}>
+                          This project will display its live execution output here. Run your script or project from the terminal, or click the button below to start.
+                        </p>
+                        <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                          <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "8px 18px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+                            ▶ Execute {activeFile || "Project"} Now
+                          </button>
+                          <button onClick={() => setTerminalOpen(true)} style={{ padding: "8px 16px", background: "#1a1a28", border: "1px solid #33334d", borderRadius: 8, color: "#ccc", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                            💻 Open Interactive Terminal
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1240,6 +1490,64 @@ export default function RoomPage() {
                 {publishing ? "Publishing..." : "Publish Now"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Nickname Prompt Modal ── */}
+      {nicknameModalOpen && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999999, background: "rgba(0,0,0,0.85)",
+          backdropFilter: "blur(12px)", display: "grid", placeItems: "center", padding: 20
+        }}>
+          <div style={{
+            width: "100%", maxWidth: 400, background: "#121218", border: "1px solid rgba(124, 58, 237, 0.45)",
+            borderRadius: 18, padding: 24, boxShadow: "0 20px 50px rgba(0,0,0,0.9), 0 0 30px rgba(124,58,237,0.3)",
+            animation: "pcp-fadeIn 0.25s ease-out"
+          }}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "grid", placeItems: "center", margin: "0 auto 12px", color: "#fff", fontSize: 24, fontWeight: 800, boxShadow: "0 0 20px rgba(124,58,237,0.5)" }}>
+                {tempNickname.trim() ? tempNickname.trim().charAt(0).toUpperCase() : "👋"}
+              </div>
+              <h2 style={{ margin: 0, fontSize: 20, color: "#fff", fontWeight: 800, letterSpacing: "-0.01em" }}>Enter Your Nickname</h2>
+              <p style={{ margin: "6px 0 0", fontSize: 13, color: "#94a3b8", lineHeight: 1.4 }}>
+                Choose a nickname to display to other users in this room, chat, and call.
+              </p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const nameToUse = tempNickname.trim() || "Guest";
+                setCurrentUserName(nameToUse);
+                if (typeof window !== "undefined") {
+                  sessionStorage.setItem(`codetogether_nickname_${roomId}`, nameToUse);
+                }
+                setNicknameModalOpen(false);
+                if (roomChannelRef.current) {
+                  void roomChannelRef.current.track({ userId: currentUserId, name: nameToUse, avatar: userAvatar });
+                }
+              }}
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            >
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#c4b5fd", textTransform: "uppercase", marginBottom: 6 }}>NICKNAME / ALIAS</label>
+                <input
+                  autoFocus
+                  value={tempNickname}
+                  onChange={(e) => setTempNickname(e.target.value)}
+                  placeholder="e.g. Alex, CodeGuru, Ramji"
+                  style={{ width: "100%", background: "#1a1a24", border: "1px solid #7C3AED66", borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px", outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{ width: "100%", padding: 12, border: "none", borderRadius: 8, background: "linear-gradient(135deg,#7C3AED,#5b21b6)", color: "#fff", cursor: "pointer", fontWeight: 800, fontSize: 14, boxShadow: "0 4px 16px rgba(124,58,237,0.4)" }}
+              >
+                Join Room as &ldquo;{tempNickname.trim() || "Guest"}&rdquo;
+              </button>
+            </form>
           </div>
         </div>
       )}

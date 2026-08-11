@@ -1,6 +1,6 @@
 "use client";
 
-import { Files, Mail, Settings, UserCircle, PenTool, Sparkles, BookOpen, Clock, Bug, Users, Monitor } from "lucide-react";
+import { Files, Mail, Settings, PenTool, Sparkles, BookOpen, Clock, Bug, Users, Monitor, LucideIcon } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 
 type ActivityBarProps = {
@@ -14,25 +14,35 @@ type ActivityBarProps = {
   onScreenShareClick?: () => void;
 };
 
+type ActivityItem = {
+  id: string;
+  icon: LucideIcon;
+  label: string;
+  badge?: number;
+};
+
 export default function ActivityBar({ activePanel, onPanelChange, unreadChat = 0, participantCount = 0, userAvatar, userName = "User", onProfileClick, onScreenShareClick }: ActivityBarProps) {
-  const topItems = [
-    { id: "files", icon: <Files size={22} />, label: "Explorer" },
-    { id: "participants", icon: <Users size={22} />, label: "Participants & Video Call", badge: participantCount, badgeColor: "#22c55e" },
-    { id: "debug", icon: <Bug size={22} />, label: "Debug & Breakpoints" },
-    { id: "chat", icon: <Mail size={22} />, label: "Chat", badge: unreadChat, badgeColor: "#7C3AED" },
-    { id: "whiteboard", icon: <PenTool size={22} />, label: "Whiteboard" },
-    { id: "ai", icon: <Sparkles size={22} />, label: "AI Assistant" },
-    { id: "notes", icon: <BookOpen size={22} />, label: "Teacher Notes" },
-    { id: "timer", icon: <Clock size={22} />, label: "Session Timer" },
-    { id: "screenshare", icon: <Monitor size={22} />, label: "Share Screen" },
+  const topItems: ActivityItem[] = [
+    { id: "files", icon: Files, label: "Explorer" },
+    { id: "participants", icon: Users, label: "Participants & Video Call", badge: participantCount },
+    { id: "debug", icon: Bug, label: "Debug & Breakpoints" },
+    { id: "chat", icon: Mail, label: "Chat", badge: unreadChat },
+    { id: "whiteboard", icon: PenTool, label: "Whiteboard" },
+    { id: "ai", icon: Sparkles, label: "AI Assistant" },
+    { id: "notes", icon: BookOpen, label: "Teacher Notes" },
+    { id: "timer", icon: Clock, label: "Session Timer" },
+    { id: "screenshare", icon: Monitor, label: "Share Screen" },
   ];
 
-  const bottomItems = [
-    { id: "settings", icon: <Settings size={22} />, label: "Settings" },
+  const bottomItems: ActivityItem[] = [
+    { id: "settings", icon: Settings, label: "Settings" },
   ];
 
-  const Item = ({ item }: { item: typeof topItems[0] }) => {
+  const Item = ({ item }: { item: ActivityItem }) => {
     const isActive = activePanel === item.id;
+    const Icon = item.icon;
+    const iconColor = isActive ? "#ffffff" : "#a7a7a7";
+
     return (
       <div
         onClick={() => {
@@ -47,23 +57,27 @@ export default function ActivityBar({ activePanel, onPanelChange, unreadChat = 0
           onPanelChange(isActive ? "none" : item.id);
         }}
         title={item.label}
-        style={{
-          height: 44, width: "100%", display: "flex", alignItems: "center",
-          justifyContent: "center", cursor: "pointer",
-          color: isActive ? "#ffffff" : "#666", position: "relative",
-          transition: "color 0.2s",
-          background: isActive ? "rgba(124,58,237,0.12)" : "transparent",
-        }}
-        onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "#ccc"; }}
-        onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.color = "#666"; }}
+        className={`h-[44px] w-full flex items-center justify-center cursor-pointer relative transition-colors ${
+          isActive ? "bg-white/10" : "hover:bg-white/5"
+        }`}
       >
         {isActive && (
-          <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", width: 2, height: 28, background: "#7C3AED", borderRadius: "0 2px 2px 0" }} />
+          <div
+            className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-[28px] rounded-r"
+            style={{ backgroundColor: "#ffffff" }}
+          />
         )}
-        {item.icon}
-        {"badge" in item && (item as any).badge > 0 && (
-          <div style={{ position: "absolute", bottom: 8, right: 8, background: (item as any).badgeColor || "#7C3AED", color: "white", fontSize: 9, borderRadius: "50%", width: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>
-            {(item as any).badge}
+        <Icon
+          size={22}
+          className={isActive ? "activity-icon-active" : "activity-icon-idle"}
+          style={{ color: iconColor }}
+          strokeWidth={isActive ? 2.4 : 1.9}
+        />
+        {item.badge !== undefined && item.badge > 0 && (
+          <div
+            className="absolute bottom-2 right-2 text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold text-black bg-white"
+          >
+            {item.badge}
           </div>
         )}
       </div>
@@ -71,25 +85,22 @@ export default function ActivityBar({ activePanel, onPanelChange, unreadChat = 0
   };
 
   return (
-    <div style={{ width: 48, background: "#1e1e1e", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "4px 0", zIndex: 100, borderRight: "1px solid #2b2b2b" }}>
-      <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
+    <div className="w-[48px] bg-ct-vscode-bg flex flex-col items-center justify-between py-1 z-[100] border-r border-[#2b2b2b]">
+      <div className="flex flex-col w-full">
         {topItems.map((item) => <Item key={item.id} item={item} />)}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "8px" }}>
+      <div className="flex flex-col w-full gap-2">
         {bottomItems.map((item) => <Item key={item.id} item={item} />)}
         <div
           onClick={() => onProfileClick && onProfileClick()}
           title="User Profile"
-          style={{
-            height: 44, width: "100%", display: "flex", alignItems: "center",
-            justifyContent: "center", cursor: "pointer",
-            marginBottom: "8px"
-          }}
+          className="h-[44px] w-full flex items-center justify-center cursor-pointer mb-2"
         >
           {userAvatar ? (
-            <img src={userAvatar} alt="Profile" style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover" }} />
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={userAvatar} alt="Profile" className="w-7 h-7 rounded-full object-cover ring-1 ring-white/20" />
           ) : (
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#60a5fa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: "bold", color: "#fff" }}>
+            <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-[11px] font-bold text-black shadow-[0_0_16px_rgba(255,255,255,0.18)]">
               {getInitials(userName)}
             </div>
           )}

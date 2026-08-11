@@ -11,7 +11,24 @@ type Note = {
   published: boolean;
   pinned: boolean;
   createdAt: number;
+  color?: string;
 };
+
+const NOTE_COLORS = [
+  { id: "default", label: "Default", bg: "#1a1a2e", border: "#333355", accent: "#cccccc" },
+  { id: "yellow", label: "Yellow", bg: "#3d3419", border: "#FBBF24", accent: "#FBBF24" },
+  { id: "blue", label: "Blue", bg: "#1a2540", border: "#3B82F6", accent: "#60A5FA" },
+  { id: "green", label: "Green", bg: "#1a2e1f", border: "#22C55E", accent: "#4ADE80" },
+  { id: "purple", label: "Purple", bg: "#2a1a3d", border: "#A855F7", accent: "#C084FC" },
+  { id: "pink", label: "Pink", bg: "#3d1a2e", border: "#EC4899", accent: "#F472B6" },
+  { id: "orange", label: "Orange", bg: "#3d2519", border: "#F97316", accent: "#FB923C" },
+  { id: "cyan", label: "Cyan", bg: "#1a2e3d", border: "#06B6D4", accent: "#22D3EE" },
+  { id: "red", label: "Red", bg: "#3d1a1a", border: "#EF4444", accent: "#F87171" },
+];
+
+function getNoteColor(id?: string) {
+  return NOTE_COLORS.find((c) => c.id === id) || NOTE_COLORS[0];
+}
 
 type SharedNote = {
   id: string;
@@ -48,7 +65,6 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
     notesRef.current = notes;
   }, [notes]);
 
-  // Load private notes from localStorage (room-specific)
   useEffect(() => {
     const key = `notes_${roomId}_${currentUserId}`;
     try {
@@ -57,14 +73,13 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
     } catch {}
   }, [roomId, currentUserId]);
 
-  // Realtime channel subscription for notes sync
   useEffect(() => {
     if (!roomId) return;
     const channel = supabase.channel(`notes:${roomId}`);
     channelRef.current = channel;
 
     channel
-      .on("broadcast", { event: "notes-update" }, ({ payload }) => {
+      .on("broadcast", { event: "notes-update" }, ({ payload }: any) => {
         const { note } = payload;
         if (note) {
           setSharedNotes((prev) => {
@@ -75,7 +90,6 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
               return [note, ...prev];
             }
           });
-          // Update currently viewed shared note if it is active
           setActiveNote((currActive) => {
             if (currActive === note.id) {
               setEditTitle(note.title);
@@ -85,7 +99,7 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
           });
         }
       })
-      .on("broadcast", { event: "notes-delete" }, ({ payload }) => {
+      .on("broadcast", { event: "notes-delete" }, ({ payload }: { payload: { noteId: string } }) => {
         const { noteId } = payload;
         if (noteId) {
           setSharedNotes((prev) => prev.filter((n) => n.id !== noteId));
@@ -99,311 +113,281 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
           });
         }
       })
-      .on("broadcast", { event: "notes-request" }, () => {
-        // Someone joined and wants published notes
-        const myPublishedNotes = notesRef.current
-          .filter((n) => n.published)
-          .map((n) => ({
-            id: n.id,
-            title: n.title,
-            content: n.content,
-            publisherId: currentUserId,
-            publisherName: currentUserName,
-            createdAt: n.createdAt,
-          }));
-
-        if (myPublishedNotes.length > 0) {
-          channel.send({
-            type: "broadcast",
-            event: "notes-sync",
-            payload: { notes: myPublishedNotes },
-          });
-        }
-      })
-      .on("broadcast", { event: "notes-sync" }, ({ payload }) => {
-        if (payload.notes) {
-          setSharedNotes((prev) => {
-            const merged = [...prev];
-            payload.notes.forEach((newNote: SharedNote) => {
-              const idx = merged.findIndex((n) => n.id === newNote.id);
-              if (idx > -1) {
-                merged[idx] = newNote;
-              } else {
-                merged.push(newNote);
-              }
-            });
-            return merged.sort((a, b) => b.createdAt - a.createdAt);
-          });
-        }
-      })
       .subscribe();
-
-    // Trigger initial request
-    setTimeout(() => {
-      channel.send({
-        type: "broadcast",
-        event: "notes-request",
-        payload: {},
-      });
-    }, 500);
 
     return () => {
       supabase.removeChannel(channel);
-      channelRef.current = null;
     };
-  }, [roomId, currentUserId, currentUserName]);
+  }, [roomId]);
 
-  function saveToStorage(next: Note[]) {
+  const saveToStorage = (updatedNotes: Note[]) => {
     const key = `notes_${roomId}_${currentUserId}`;
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch {}
-    setNotes(next);
-  }
+    localStorage.setItem(key, JSON.stringify(updatedNotes));
+  };
 
-  function broadcastNoteUpdate(note: Note) {
-    if (channelRef.current && note.published) {
-      channelRef.current.send({
-        type: "broadcast",
-        event: "notes-update",
-        payload: {
-          note: {
-            id: note.id,
-            title: note.title,
-            content: note.content,
-            publisherId: currentUserId,
-            publisherName: currentUserName,
-            createdAt: note.createdAt,
-          },
-        },
-      });
-    }
-  }
-
-  function broadcastNoteDelete(noteId: string) {
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: "broadcast",
-        event: "notes-delete",
-        payload: { noteId },
-      });
-    }
-  }
-
-  function createNote() {
-    const note: Note = {
-      id: Math.random().toString(36).slice(2),
+  const createNote = () => {
+    const newNote: Note = {
+      id: Date.now().toString(),
       title: "Untitled Note",
       content: "",
       published: false,
       pinned: false,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      color: "default",
     };
-    const next = [note, ...notes];
-    saveToStorage(next);
+    const updated = [newNote, ...notes];
+    setNotes(updated);
+    saveToStorage(updated);
+    selectPrivateNote(newNote);
+  };
+
+  const selectPrivateNote = (note: Note) => {
     setActiveNote(note.id);
     setIsActiveShared(false);
     setEditTitle(note.title);
     setEditContent(note.content);
-    setPreview(false);
-  }
+  };
 
-  function selectNote(note: Note) {
-    setActiveNote(note.id);
-    setIsActiveShared(false);
-    setEditTitle(note.title);
-    setEditContent(note.content);
-    setPreview(false);
-  }
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || detail.roomId !== roomId || detail.userId !== currentUserId) return;
+      const newNote: Note = {
+        id: Date.now().toString(),
+        title: detail.title || "AI Note",
+        content: detail.content || "",
+        published: false,
+        pinned: false,
+        createdAt: Date.now(),
+        color: "blue",
+      };
+      setNotes((prev) => {
+        const updated = [newNote, ...prev];
+        saveToStorage(updated);
+        return updated;
+      });
+      selectPrivateNote(newNote);
+    };
+    window.addEventListener("codetogether:note-create", handler);
+    return () => window.removeEventListener("codetogether:note-create", handler);
+  }, [roomId, currentUserId]);
 
-  function selectSharedNote(note: SharedNote) {
-    // If we are the author of this note, auto-redirect selection to "My Notes" for editing
-    if (note.publisherId === currentUserId) {
-      const privateNote = notes.find((n) => n.id === note.id);
-      if (privateNote) {
-        selectNote(privateNote);
-        return;
-      }
-    }
+  const selectSharedNote = (note: SharedNote) => {
     setActiveNote(note.id);
     setIsActiveShared(true);
     setEditTitle(note.title);
     setEditContent(note.content);
-    setPreview(true); // Force read-only preview mode
-  }
+  };
 
-  function saveActiveNote() {
+  const saveActiveNote = () => {
     if (!activeNote || isActiveShared) return;
     setSaving(true);
-    const next = notes.map((n) => {
+    const updated = notes.map((n) => {
       if (n.id === activeNote) {
-        const updated = { ...n, title: editTitle, content: editContent };
-        if (updated.published) {
-          broadcastNoteUpdate(updated);
+        const noteObj = { ...n, title: editTitle.trim() || "Untitled Note", content: editContent };
+        if (n.published && channelRef.current) {
+          channelRef.current.send({
+            type: "broadcast",
+            event: "notes-update",
+            payload: {
+              note: {
+                id: noteObj.id,
+                title: noteObj.title,
+                content: noteObj.content,
+                publisherId: currentUserId,
+                publisherName: currentUserName,
+                createdAt: noteObj.createdAt,
+              },
+            },
+          });
         }
-        return updated;
+        return noteObj;
       }
       return n;
     });
-    saveToStorage(next);
-    setTimeout(() => setSaving(false), 600);
-  }
+    setNotes(updated);
+    saveToStorage(updated);
+    setTimeout(() => setSaving(false), 300);
+  };
 
-  function deleteNote(id: string) {
-    const target = notes.find((n) => n.id === id);
-    const next = notes.filter((n) => n.id !== id);
-    saveToStorage(next);
-    if (target?.published) {
-      broadcastNoteDelete(id);
-    }
+  const togglePin = (id: string) => {
+    const updated = notes.map((n) => (n.id === id ? { ...n, pinned: !n.pinned } : n));
+    setNotes(updated);
+    saveToStorage(updated);
+  };
+
+  const togglePublish = (id: string) => {
+    const updated = notes.map((n) => {
+      if (n.id === id) {
+        const nextPub = !n.published;
+        if (nextPub && channelRef.current) {
+          channelRef.current.send({
+            type: "broadcast",
+            event: "notes-update",
+            payload: {
+              note: {
+                id: n.id,
+                title: n.title,
+                content: n.content,
+                publisherId: currentUserId,
+                publisherName: currentUserName,
+                createdAt: n.createdAt,
+              },
+            },
+          });
+        } else if (!nextPub && channelRef.current) {
+          channelRef.current.send({
+            type: "broadcast",
+            event: "notes-delete",
+            payload: { noteId: n.id },
+          });
+        }
+        return { ...n, published: nextPub };
+      }
+      return n;
+    });
+    setNotes(updated);
+    saveToStorage(updated);
+  };
+
+  const setNoteColor = (id: string, colorId: string) => {
+    const updated = notes.map((n) => (n.id === id ? { ...n, color: colorId } : n));
+    setNotes(updated);
+    saveToStorage(updated);
+  };
+
+  const deleteNote = (id: string) => {
+    const updated = notes.filter((n) => n.id !== id);
+    setNotes(updated);
+    saveToStorage(updated);
     if (activeNote === id) {
       setActiveNote(null);
       setEditTitle("");
       setEditContent("");
     }
-  }
+  };
 
-  function togglePin(id: string) {
-    const next = notes.map((n) => n.id === id ? { ...n, pinned: !n.pinned } : n);
-    saveToStorage(next);
-  }
-
-  function togglePublish(id: string) {
-    const next = notes.map((n) => {
-      if (n.id === id) {
-        const nextPublished = !n.published;
-        const updated = { ...n, published: nextPublished };
-        if (nextPublished) {
-          broadcastNoteUpdate(updated);
-        } else {
-          broadcastNoteDelete(id);
-        }
-        return updated;
-      }
-      return n;
-    });
-    saveToStorage(next);
-  }
-
-  function downloadNote() {
-    const title = editTitle || "note";
-    const blob = new Blob([`# ${title}\n\n${editContent}`], { type: "text/markdown" });
+  const downloadNote = () => {
+    const blob = new Blob([editContent], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${title.replace(/\s+/g, "-").toLowerCase()}.md`;
+    a.href = url;
+    a.download = `${(editTitle || "note").toLowerCase().replace(/\s+/g, "_")}.md`;
     a.click();
-    URL.revokeObjectURL(a.href);
-  }
+    URL.revokeObjectURL(url);
+  };
 
-  function copyToClipboard() {
+  const copyToClipboard = () => {
     navigator.clipboard.writeText(editContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
+  };
 
-  function renderMarkdown(md: string) {
+  const sortedNotes = [...notes].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  const activePrivate = notes.find((n) => n.id === activeNote);
+  const activeShared = sharedNotes.find((n) => n.id === activeNote);
+  const hasActive = activeNote !== null;
+
+  const activeColor = getNoteColor(activePrivate?.color);
+
+  function renderMarkdown(md: string, accentColor = "#fff") {
     return md
-      .replace(/^### (.+)$/gm, "<h3 style='font-size:14px;font-weight:700;margin:12px 0 6px;color:#e0e0e0'>$1</h3>")
-      .replace(/^## (.+)$/gm, "<h2 style='font-size:16px;font-weight:700;margin:14px 0 8px;color:#fff'>$1</h2>")
-      .replace(/^# (.+)$/gm, "<h1 style='font-size:18px;font-weight:800;margin:16px 0 10px;color:#fff'>$1</h1>")
+      .replace(/^### (.*$)/gim, `<h3 style="font-size:15px;font-weight:700;margin:12px 0 6px;color:${accentColor};">$1</h3>`)
+      .replace(/^## (.*$)/gim, `<h2 style="font-size:17px;font-weight:800;margin:16px 0 8px;color:${accentColor};">$1</h2>`)
+      .replace(/^# (.*$)/gim, `<h1 style="font-size:20px;font-weight:900;margin:20px 0 10px;color:${accentColor};">$1</h1>`)
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
-      .replace(/`([^`]+)`/g, "<code style='background:#1a1a2e;padding:1px 5px;border-radius:3px;font-size:12px;color:#c4b5fd;font-family:monospace'>$1</code>")
-      .replace(/```([\s\S]*?)```/g, "<pre style='background:#0d0d1a;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;border:1px solid #333;margin:8px 0'><code>$1</code></pre>")
-      .replace(/^- (.+)$/gm, "<li style='margin:3px 0;padding-left:4px'>$1</li>")
+      .replace(/`([^`]+)`/g, '<code style="background:#222;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px;color:#fff;">$1</code>')
+      .replace(/```([\s\S]*?)```/g, '<pre style="background:#111;padding:12px;border-radius:8px;overflow-x:auto;font-family:monospace;font-size:12px;color:#ccc;"><code>$1</code></pre>')
       .replace(/\n/g, "<br/>");
   }
 
-  const sortedNotes = [...notes].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return b.createdAt - a.createdAt;
-  });
-
-  const activeShared = sharedNotes.find((n) => n.id === activeNote);
-  const activePrivate = notes.find((n) => n.id === activeNote);
-  const hasActive = isActiveShared ? !!activeShared : !!activePrivate;
-
   return (
-    <div style={{ display: "flex", height: "100%", background: "#141420", color: "#e0e0e0" }}>
-      {/* Notes list */}
-      <div style={{ width: 200, borderRight: "1px solid #222", display: "flex", flexDirection: "column", background: "#1a1a2e", flexShrink: 0 }}>
-        <div style={{ padding: "12px 12px 8px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#c4b5fd" }}>
-            <BookOpen size={14} /> Notes
+    <div className="flex h-full bg-ct-dark-black text-gray-200 font-inter">
+      {/* Sidebar List */}
+      <div className="w-[200px] border-r border-[#222222] flex flex-col bg-ct-dark-black">
+        <div className="p-3 border-b border-[#222222] flex items-center justify-between">
+          <div className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+            <BookOpen size={13}/> Notes
           </div>
-          <button onClick={createNote}
-            style={{ width: 24, height: 24, borderRadius: 6, border: "none", background: "#7C3AED", cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Plus size={12} />
+          <button onClick={createNote} title="New note" className="p-1 bg-white text-black border-none rounded cursor-pointer hover:bg-gray-200 transition-colors">
+            <Plus size={13}/>
           </button>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-          {/* My Notes Header */}
-          <div style={{ padding: "10px 12px 4px", fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em" }}>My Notes</div>
-          
-          {sortedNotes.length === 0 ? (
-            <div style={{ padding: "8px 12px", color: "#444", fontSize: 11 }}>No personal notes</div>
-          ) : sortedNotes.map((note) => (
-            <div key={note.id}
-              onClick={() => selectNote(note)}
+        <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-1">
+          {/* Private Notes */}
+          <div className="text-[10px] text-gray-500 uppercase tracking-wider px-2 py-1 font-bold">My Notes</div>
+          {sortedNotes.length === 0 && (
+            <div className="text-[11px] text-gray-600 px-2 py-2 italic">No notes yet. Click + to create.</div>
+          )}
+          {sortedNotes.map((note) => {
+            const noteColor = getNoteColor(note.color);
+            return (
+            <div
+              key={note.id}
+              onClick={() => selectPrivateNote(note)}
+              className={`p-2 rounded-lg cursor-pointer transition-colors border-l-2 ${
+                activeNote === note.id && !isActiveShared ? "text-white" : "hover:bg-white/5 text-gray-300"
+              }`}
               style={{
-                padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #1a1a1a",
-                background: (activeNote === note.id && !isActiveShared) ? "#7C3AED22" : "transparent",
-                borderLeft: (activeNote === note.id && !isActiveShared) ? "2px solid #7C3AED" : "2px solid transparent",
-                transition: "all 0.15s"
-              }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: (activeNote === note.id && !isActiveShared) ? "#c4b5fd" : "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 110 }}>
-                  {note.title}
-                </span>
-                <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-                  {note.pinned && <Pin size={10} color="#ffd93d" />}
-                  {note.published && <Globe size={10} color="#6bcb77" />}
-                </div>
+                borderLeftColor: noteColor.border,
+                backgroundColor: activeNote === note.id && !isActiveShared ? noteColor.bg : undefined,
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold truncate flex-1 mr-1" style={{ color: noteColor.accent }}>{note.title}</span>
+                {note.pinned && <Pin size={10} className="shrink-0" style={{ color: noteColor.accent }} />}
               </div>
-              <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>
-                {new Date(note.createdAt).toLocaleDateString()}
-              </div>
-            </div>
-          ))}
-
-          {/* Shared Notes Header */}
-          <div style={{ padding: "16px 12px 4px", fontSize: 10, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.05em", borderTop: "1px solid #222", marginTop: 10 }}>Shared Notes</div>
-
-          {sharedNotes.length === 0 ? (
-            <div style={{ padding: "8px 12px", color: "#444", fontSize: 11 }}>No shared notes</div>
-          ) : sharedNotes.map((note) => (
-            <div key={note.id}
-              onClick={() => selectSharedNote(note)}
-              style={{
-                padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #1a1a1a",
-                background: (activeNote === note.id && isActiveShared) ? "#7C3AED22" : "transparent",
-                borderLeft: (activeNote === note.id && isActiveShared) ? "2px solid #7C3AED" : "2px solid transparent",
-                transition: "all 0.15s"
-              }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: (activeNote === note.id && isActiveShared) ? "#c4b5fd" : "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 130 }}>
-                  {note.title}
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9, color: "#555", marginTop: 2 }}>
-                <span>by {note.publisherName}</span>
+              <div className="flex justify-between items-center text-[9px] text-gray-500 mt-1">
                 <span>{new Date(note.createdAt).toLocaleDateString()}</span>
+                {note.published && <span className="text-green-400">Shared</span>}
               </div>
             </div>
-          ))}
+          );})}
+
+          {/* Shared Classroom Notes */}
+          {sharedNotes.length > 0 && (
+            <>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider px-2 pt-3 pb-1 font-bold flex items-center gap-1">
+                <Globe size={10}/> Classroom Notes
+              </div>
+              {sharedNotes.map((note) => (
+                <div
+                  key={note.id}
+                  onClick={() => selectSharedNote(note)}
+                  className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                    activeNote === note.id && isActiveShared ? "bg-white/15 text-white" : "hover:bg-white/5 text-gray-300"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold truncate flex-1 mr-1">{note.title}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[9px] text-gray-500 mt-1">
+                    <span>by {note.publisherName}</span>
+                    <span>{new Date(note.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
       {/* Editor area */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+      <div className="flex-1 flex flex-col">
         {hasActive ? (
           <>
             {/* Toolbar */}
-            <div style={{ padding: "8px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", gap: 6, background: "#1a1a2e", flexWrap: "wrap" }}>
+            <div
+              className="p-[8px_12px] border-b border-[#222222] flex items-center gap-1.5 flex-wrap"
+              style={{ backgroundColor: activeColor.bg }}
+            >
               {isActiveShared ? (
-                <div style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", gap: 6 }}>
-                  <Globe size={14} color="#6bcb77" />
+                <div className="flex-1 text-sm font-bold text-white flex items-center gap-1.5">
+                  <Globe size={14} className="text-green-400" />
                   <span>{editTitle}</span>
-                  <span style={{ fontSize: 10, color: "#666", fontWeight: 400 }}>Shared by {activeShared?.publisherName}</span>
+                  <span className="text-[10px] text-gray-500 font-normal">Shared by {activeShared?.publisherName}</span>
                 </div>
               ) : (
                 <input
@@ -411,44 +395,65 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
                   onChange={(e) => setEditTitle(e.target.value)}
                   onBlur={saveActiveNote}
                   placeholder="Note title..."
-                  style={{ flex: 1, minWidth: 120, background: "transparent", border: "none", outline: "none", fontSize: 14, fontWeight: 700, color: "#fff" }}
+                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm font-bold text-white"
                 />
               )}
-              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <div className="flex gap-1 items-center">
                 {isActiveShared ? (
                   <>
                     <button onClick={copyToClipboard} title="Copy to Clipboard"
-                      style={{ padding: "4px 8px", border: "1px solid #333", borderRadius: 6, background: "transparent", color: "#888", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-                      {copied ? <Check size={12} color="#22c55e" /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
+                      className="px-2 py-1 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
+                      {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
                     </button>
                     <button onClick={downloadNote} title="Download Markdown"
-                      style={{ padding: "4px 8px", border: "1px solid #333", borderRadius: 6, background: "transparent", color: "#888", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                      className="px-2 py-1 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
                       <Download size={12} /> Save
                     </button>
                   </>
                 ) : (
                   <>
+                    {!isActiveShared && activePrivate && (
+                      <div className="flex items-center gap-1 mr-1">
+                        {NOTE_COLORS.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => setNoteColor(activePrivate.id, c.id)}
+                            title={c.label}
+                            className={`w-4 h-4 rounded-full border-2 transition-transform hover:scale-110 ${
+                              activePrivate.color === c.id || (!activePrivate.color && c.id === "default")
+                                ? "border-white scale-110"
+                                : "border-transparent"
+                            }`}
+                            style={{ backgroundColor: c.border }}
+                          />
+                        ))}
+                      </div>
+                    )}
                     <button onClick={() => setPreview((p) => !p)} title={preview ? "Edit" : "Preview"}
-                      style={{ padding: "4px 8px", border: "1px solid #333", borderRadius: 6, background: preview ? "#7C3AED22" : "transparent", color: preview ? "#c4b5fd" : "#666", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                      className={`px-2 py-1 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                        preview ? "bg-white/20 text-white" : "bg-transparent text-gray-400 hover:text-white"
+                      }`}>
                       {preview ? <Edit3 size={12} /> : <Eye size={12} />} {preview ? "Edit" : "Preview"}
                     </button>
-                    <button onClick={() => activePrivate && togglePin(activePrivate.id)} title="Pin">
+                    <button onClick={() => activePrivate && togglePin(activePrivate.id)} title="Pin" className="bg-transparent border-none p-1 cursor-pointer">
                       {activePrivate?.pinned
-                        ? <PinOff size={14} color="#ffd93d" style={{ cursor: "pointer" }} />
-                        : <Pin size={14} color="#666" style={{ cursor: "pointer" }} />}
+                        ? <PinOff size={14} className="text-white" />
+                        : <Pin size={14} className="text-gray-500 hover:text-white" />}
                     </button>
                     <button onClick={downloadNote} title="Download Markdown"
-                      style={{ padding: "4px 6px", border: "1px solid #333", borderRadius: 6, background: "transparent", color: "#666", cursor: "pointer" }}>
+                      className="p-[4px_6px] border border-[#333] rounded-md bg-transparent text-gray-400 cursor-pointer hover:text-white">
                       <Download size={12} />
                     </button>
                     {(isTeacher || activePrivate?.published) && activePrivate && (
                       <button onClick={() => togglePublish(activePrivate.id)} title="Publish to classroom"
-                        style={{ padding: "4px 8px", border: "1px solid #333", borderRadius: 6, background: activePrivate.published ? "#6bcb7722" : "transparent", color: activePrivate.published ? "#6bcb77" : "#666", cursor: "pointer", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                        className={`px-2 py-1 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                          activePrivate.published ? "bg-green-500/20 text-green-400 border-green-500/40" : "bg-transparent text-gray-400 hover:text-white"
+                        }`}>
                         <Send size={12} /> {activePrivate.published ? "Shared" : "Share"}
                       </button>
                     )}
                     <button onClick={() => activePrivate && deleteNote(activePrivate.id)} title="Delete"
-                      style={{ padding: "4px 6px", border: "1px solid #333", borderRadius: 6, background: "transparent", color: "#e55", cursor: "pointer" }}>
+                      className="p-[4px_6px] border border-[#333] rounded-md bg-transparent text-red-400 cursor-pointer hover:bg-red-500/20">
                       <Trash2 size={12} />
                     </button>
                   </>
@@ -457,11 +462,11 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
             </div>
 
             {/* Content */}
-            <div style={{ flex: 1, overflow: "auto" }}>
+            <div className="flex-1 overflow-auto" style={{ backgroundColor: activeColor.bg }}>
               {preview ? (
                 <div
-                  style={{ padding: 20, fontSize: 13, lineHeight: 1.8, color: "#ccc" }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(editContent) }}
+                  className="p-5 text-sm leading-relaxed text-gray-300"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(editContent, activeColor.accent) }}
                 />
               ) : (
                 <textarea
@@ -469,27 +474,24 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
                   onChange={(e) => setEditContent(e.target.value)}
                   onBlur={saveActiveNote}
                   placeholder={`# ${editTitle}\n\nStart writing your notes here...\n\nMarkdown is supported!\n- **Bold** text\n- *Italic* text\n- \`inline code\`\n- Code blocks with triple backticks`}
-                  style={{
-                    width: "100%", height: "100%", background: "transparent", border: "none", outline: "none",
-                    color: "#ccc", fontSize: 13, lineHeight: 1.8, padding: 16, resize: "none",
-                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace", boxSizing: "border-box"
-                  }}
+                  className="w-full h-full bg-transparent border-none outline-none text-gray-300 text-sm leading-relaxed p-4 resize-none font-mono box-border"
+                  style={{ color: activeColor.accent }}
                 />
               )}
             </div>
 
             {/* Status bar */}
-            <div style={{ padding: "4px 14px", borderTop: "1px solid #222", fontSize: 10, color: "#555", display: "flex", justifyContent: "space-between" }}>
+            <div className="px-3.5 py-1 border-t border-[#222222] text-[10px] text-gray-500 flex justify-between" style={{ backgroundColor: activeColor.bg }}>
               <span>{isActiveShared ? "Shared Notes" : saving ? "Saving..." : "Saved"} · Markdown</span>
               <span>{editContent.split(/\s+/).filter(Boolean).length} words</span>
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: "#555" }}>
-            <BookOpen size={36} style={{ opacity: 0.3 }} />
-            <p style={{ fontSize: 13 }}>Select a note or create a new one</p>
+          <div className="flex-1 flex items-center justify-center flex-col gap-3 text-gray-500">
+            <BookOpen size={36} className="opacity-30" />
+            <p className="text-xs">Select a note or create a new one</p>
             <button onClick={createNote}
-              style={{ padding: "8px 20px", background: "#7C3AED", border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              className="px-5 py-2 bg-white border-none rounded-lg text-black cursor-pointer text-xs font-bold hover:bg-gray-200 transition-colors">
               + New Note
             </button>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -20,13 +20,13 @@ const FEATURES = [
 ];
 
 const ACCOUNT_TYPES = [
-  { id: "student", icon: <GraduationCap size={28}/>, label: "Student", color: "#4ade80", bg: "#4ade8015",
+  { id: "student", icon: <GraduationCap size={28}/>, label: "Student", color: "text-white", borderColor: "border-white/20", bgClass: "bg-white/5",
     desc: "Join live sessions, learn from peers & instructors.", perks: ["Join unlimited rooms","Real-time code sync","AI explanations","Download session notes"] },
-  { id: "teacher", icon: <BookOpen size={28}/>, label: "Teacher", color: "#60a5fa", bg: "#60a5fa15",
+  { id: "teacher", icon: <BookOpen size={28}/>, label: "Teacher", color: "text-gray-300", borderColor: "border-gray-300/20", bgClass: "bg-gray-300/5",
     desc: "Host sessions, manage classrooms & publish content.", perks: ["Create 250-seat rooms","Session timer & lifecycle","Teacher notes system","Whiteboard & annotations"] },
-  { id: "youtube", icon: <Tv size={28}/>, label: "YouTuber / Creator", color: "#f87171", bg: "#f8717115",
+  { id: "youtube", icon: <Tv size={28}/>, label: "YouTuber / Creator", color: "text-gray-400", borderColor: "border-gray-400/20", bgClass: "bg-gray-400/5",
     desc: "Stream coding sessions and grow your audience.", perks: ["Sharable short codes","Live viewer mode","Record-ready layout","Audience join links"] },
-  { id: "business", icon: <Briefcase size={28}/>, label: "Business / Team", color: "#c084fc", bg: "#c084fc15",
+  { id: "business", icon: <Briefcase size={28}/>, label: "Business / Team", color: "text-gray-500", borderColor: "border-gray-500/20", bgClass: "bg-gray-500/5",
     desc: "Pair-program, review PRs, onboard engineers fast.", perks: ["Unlimited workspaces","Role-based access","Private rooms","Team analytics"] },
 ];
 
@@ -42,6 +42,91 @@ const TESTIMONIALS = [
   { name: "Dev K.", role: "Tech YouTuber", avatar: "D", quote: "My viewers can follow along and even join my room. Engagement went through the roof." },
 ];
 
+type DragPoint = { x: number; y: number };
+
+function LandingDanceCard({
+  children,
+  className = "",
+  delay = 0,
+  amplitude = 1,
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  delay?: number;
+  amplitude?: number;
+  onClick?: () => void;
+}) {
+  const [drag, setDrag] = useState<DragPoint>({ x: 0, y: 0 });
+  const [start, setStart] = useState<DragPoint | null>(null);
+  const [moved, setMoved] = useState(false);
+
+  return (
+    <div
+      className={`landing-dance-card ${className}`}
+      style={{
+        "--dance-delay": `${delay}s`,
+        "--dance-amplitude": amplitude,
+        transform: `translate3d(${drag.x}px, ${drag.y}px, 0)`,
+      } as CSSProperties}
+      onPointerDown={(event) => {
+        if ((event.target as HTMLElement).closest("button, input")) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setMoved(false);
+        setStart({ x: event.clientX - drag.x, y: event.clientY - drag.y });
+      }}
+      onPointerMove={(event) => {
+        if (!start) return;
+        const nextX = Math.max(-34, Math.min(34, event.clientX - start.x));
+        const nextY = Math.max(-24, Math.min(24, event.clientY - start.y));
+        if (Math.abs(nextX - drag.x) > 2 || Math.abs(nextY - drag.y) > 2) setMoved(true);
+        setDrag({ x: nextX, y: nextY });
+      }}
+      onPointerUp={() => setStart(null)}
+      onPointerCancel={() => setStart(null)}
+      onClick={() => {
+        if (!moved) onClick?.();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ParticleLogo() {
+  const words = ["Code", "Together"];
+
+  return (
+    <h1 className="particle-logo" aria-label="CodeTogether">
+      {words.map((word, wordIndex) => (
+        <span
+          key={word}
+          className={`logo-word logo-word-${word.toLowerCase()}`}
+          style={{
+            "--word-index": wordIndex,
+            "--break-x": wordIndex === 0 ? "-0.48em" : "0.48em",
+          } as CSSProperties}
+        >
+          {word.split("").map((letter, letterIndex) => (
+            <span
+              key={`${word}-${letter}-${letterIndex}`}
+              className="logo-letter"
+              style={{
+                "--letter-index": letterIndex,
+                "--letter-delay": `${wordIndex * 180 + letterIndex * 48}ms`,
+                "--letter-x": `${(letterIndex - (word.length - 1) / 2) * 0.16}em`,
+                "--letter-y": `${((letterIndex % 3) - 1) * 0.2}em`,
+              } as CSSProperties}
+            >
+              {letter}
+            </span>
+          ))}
+        </span>
+      ))}
+    </h1>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const [roomCode, setRoomCode] = useState("");
@@ -54,7 +139,7 @@ export default function Home() {
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
     window.addEventListener("scroll", onScroll);
-    supabase.auth.getSession().then(({ data }) => setAuthUser(data.session?.user ?? null));
+    supabase.auth.getSession().then((result: any) => setAuthUser(result?.data?.session?.user ?? null));
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
@@ -74,214 +159,208 @@ export default function Home() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080810", color: "#e0e0e0", fontFamily: "Inter, sans-serif", overflowX: "hidden" }}>
+    <div className="min-h-screen bg-ct-dark text-gray-200 font-inter overflow-x-hidden">
 
       {/* ── NAVBAR ── */}
-      <header style={{
-        position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
-        background: scrolled ? "rgba(8,8,16,0.85)" : "transparent",
-        backdropFilter: scrolled ? "blur(20px)" : "none",
-        WebkitBackdropFilter: scrolled ? "blur(20px)" : "none",
-        borderBottom: scrolled ? "1px solid rgba(255,255,255,0.05)" : "1px solid transparent",
-        transition: "all 0.3s", padding: "0 24px",
-      }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link href="/" style={{ fontSize: 22, fontWeight: 900, color: "#7C3AED", textDecoration: "none", letterSpacing: "-0.5px" }}>
-            Code<span style={{ color: "#c4b5fd" }}>Together</span>
+      <header className={`fixed top-0 left-0 right-0 z-[1000] transition-all duration-300 px-6 ${scrolled ? 'bg-ct-dark-black/85 backdrop-blur-[20px] border-b border-white/5' : 'bg-transparent border-b border-transparent'}`}>
+        <div className="max-w-[1200px] mx-auto h-16 flex items-center justify-between">
+          <Link href="/" className="text-[22px] font-black text-white no-underline tracking-tight">
+            Code<span className="text-gray-400">Together</span>
           </Link>
           {/* Desktop nav */}
-          <nav style={{ display: "flex", gap: 28, alignItems: "center" }} className="desk-nav">
+          <nav className="hidden sm:flex gap-7 items-center desk-nav">
             {["features","how-it-works","account-types","testimonials"].map((id) => (
-              <button key={id} onClick={() => scrollTo(id)} style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", fontSize: 14, textTransform: "capitalize" }}>
+              <button key={id} onClick={() => scrollTo(id)} className="bg-transparent border-none text-gray-400 cursor-pointer text-sm capitalize hover:text-white transition-colors">
                 {id.replace(/-/g, " ")}
               </button>
             ))}
           </nav>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div className="flex gap-2.5 items-center">
             {authUser ? (
-              <Link href="/dashboard" style={{ padding: "8px 18px", background: "#7C3AED", borderRadius: 8, color: "#fff", fontSize: 14, fontWeight: 700, textDecoration: "none" }}>
+              <Link href="/dashboard" className="px-[18px] py-2 bg-white rounded-lg text-black text-sm font-bold no-underline">
                 Dashboard →
               </Link>
             ) : (
               <>
-                <Link href="/login" style={{ padding: "8px 16px", border: "1px solid #333", borderRadius: 8, color: "#ccc", fontSize: 14, textDecoration: "none" }}>Login</Link>
-                <Link href="/signup" style={{ padding: "8px 18px", background: "#7C3AED", borderRadius: 8, color: "#fff", fontSize: 14, fontWeight: 700, textDecoration: "none" }}>Get Started</Link>
+                <Link href="/login" className="px-4 py-2 border border-ct-subtle rounded-lg text-gray-300 text-sm no-underline hover:border-gray-500 transition-colors">Login</Link>
+                <Link href="/signup" className="px-[18px] py-2 bg-white rounded-lg text-black text-sm font-bold no-underline hover:bg-gray-200 transition-colors">Get Started</Link>
               </>
             )}
-            <button onClick={() => setMenuOpen(!menuOpen)} className="mob-menu-btn" style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", display: "none" }}>
+            <button onClick={() => setMenuOpen(!menuOpen)} className="sm:hidden bg-transparent border-none text-gray-300 cursor-pointer mob-menu-btn">
               {menuOpen ? <X size={22}/> : <Menu size={22}/>}
             </button>
           </div>
         </div>
         {/* Mobile menu */}
         {menuOpen && (
-          <div style={{ background: "#0d0d1a", borderTop: "1px solid #222", padding: "16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="bg-ct-card border-t border-ct-subtle p-4 px-6 flex flex-col gap-4">
             {["features","how-it-works","account-types","testimonials"].map(id => (
-              <button key={id} onClick={() => scrollTo(id)} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", textAlign: "left", fontSize: 15, textTransform: "capitalize" }}>
+              <button key={id} onClick={() => scrollTo(id)} className="bg-transparent border-none text-gray-300 cursor-pointer text-left text-[15px] capitalize">
                 {id.replace(/-/g, " ")}
               </button>
             ))}
-            <Link href="/login" style={{ color: "#ccc", textDecoration: "none" }}>Login</Link>
-            <Link href="/signup" style={{ color: "#c4b5fd", fontWeight: 700, textDecoration: "none" }}>Get Started →</Link>
+            <Link href="/login" className="text-gray-300 no-underline">Login</Link>
+            <Link href="/signup" className="text-gray-400 font-bold no-underline">Get Started →</Link>
           </div>
         )}
       </header>
 
       {/* ── HERO ── */}
-      <section style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "100px 24px 80px", position: "relative", overflow: "hidden" }}>
+      <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 pt-[100px] pb-20 relative overflow-hidden">
         {/* Glow bg */}
-        <div className="animate-pulse-glow" style={{ position: "absolute", top: "20%", left: "50%", transform: "translateX(-50%)", width: 600, height: 600, background: "radial-gradient(ellipse, rgba(124,58,237,0.18) 0%, transparent 70%)", pointerEvents: "none" }} />
-        <div className="animate-float" style={{ position: "absolute", top: "30%", left: "20%", width: 300, height: 300, background: "radial-gradient(ellipse, rgba(96,165,250,0.08) 0%, transparent 70%)", pointerEvents: "none" }} />
+        <div className="animate-pulse-glow absolute top-[20%] left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[radial-gradient(ellipse,rgba(255,255,255,0.18)_0%,transparent_70%)] pointer-events-none" />
+        <div className="animate-float absolute top-[30%] left-[20%] w-[300px] h-[300px] bg-[radial-gradient(ellipse,rgba(200,200,200,0.08)_0%,transparent_70%)] pointer-events-none" />
 
-        <div className="animate-slide-up" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#7C3AED15", border: "1px solid #7C3AED44", borderRadius: 999, padding: "6px 16px", fontSize: 12, color: "#c4b5fd", marginBottom: 28, fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7C3AED", display: "inline-block" }} />
-          Code together Live — Whiteboard · AI Assistant · Session Timer
-        </div>
+        <ParticleLogo />
 
-        <h1 className="animate-slide-up delay-100" style={{ fontSize: "clamp(36px, 7vw, 72px)", fontWeight: 900, lineHeight: 1.08, letterSpacing: "-2px", maxWidth: 820, marginBottom: 24 }}>
-           Real-Time Code Collaboration<br/>
-          <span style={{ background: "linear-gradient(135deg,#7C3AED,#60a5fa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            Code together instantly.
-          </span>
-        </h1>
-
-        <p className="animate-slide-up delay-200" style={{ fontSize: "clamp(15px, 2vw, 19px)", color: "#888", maxWidth: 600, lineHeight: 1.7, marginBottom: 44 }}>
-          Real-time code editor, video calls, interactive terminal, whiteboard, and AI assistant — all in one browser tab. No setup. No installs.
+        <p className="animate-slide-up [animation-delay:200ms] opacity-0 text-[clamp(15px,2vw,19px)] text-ct-muted max-w-[560px] leading-[1.7] mb-11">
+          A live coding room with editor, calls, terminal, whiteboard, and AI.
         </p>
 
-        <div className="animate-slide-up delay-300" style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", marginBottom: 40 }}>
-          <Link href="/signup" style={{ padding: "14px 32px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", borderRadius: 12, color: "#fff", fontSize: 16, fontWeight: 700, textDecoration: "none", boxShadow: "0 0 40px rgba(124,58,237,0.35)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <div className="animate-slide-up [animation-delay:300ms] opacity-0 flex gap-3.5 flex-wrap justify-center mb-10">
+          <Link href="/signup" className="px-8 py-3.5 bg-gradient-to-br from-white to-gray-300 rounded-xl text-black text-base font-bold no-underline shadow-glow-white inline-flex items-center gap-2 hover:scale-105 transition-transform">
             Start for Free 
             <ArrowRight size={18}/>
           </Link>
-          <button onClick={() => scrollTo("how-it-works")} style={{ padding: "14px 28px", background: "transparent", border: "1px solid #333", borderRadius: 12, color: "#ccc", fontSize: 16, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <button onClick={() => scrollTo("how-it-works")} className="px-7 py-3.5 bg-transparent border border-ct-subtle rounded-xl text-gray-300 text-base cursor-pointer inline-flex items-center gap-2 hover:border-gray-500 transition-colors">
             <Play size={16}/> See how it works
           </button>
         </div>
 
         {/* Room join */}
-        <div className="glass-panel animate-scale-in delay-400 hover-card-glow" style={{ borderRadius: 16, padding: 20, maxWidth: 480, width: "100%" }}>
-          <p style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>Have a room code? Join instantly:</p>
-          <div style={{ display: "flex", gap: 10 }}>
+        <LandingDanceCard className="animate-scale-in [animation-delay:400ms] opacity-0 rounded-2xl p-5 max-w-[480px] w-full" delay={0.15} amplitude={1.2}>
+          <p className="text-[13px] text-ct-dimmer mb-3">Have a room code? Join instantly:</p>
+          <div className="flex gap-2.5">
             <input value={roomCode} onChange={e => { setRoomCode(e.target.value.toUpperCase()); setJoinError(""); }}
               onKeyDown={e => e.key === "Enter" && handleJoin()}
               placeholder="Enter code e.g. XK9P2M"
-              style={{ flex: 1, background: "#1a1a2e", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "#fff", fontSize: 14, outline: "none", letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }}
+              className="flex-1 bg-ct-input border border-ct-subtle rounded-[10px] px-3.5 py-2.5 text-white text-sm outline-none tracking-[2px] font-bold uppercase placeholder:text-gray-600"
             />
             <button onClick={handleJoin} disabled={joining}
-              style={{ padding: "10px 20px", background: "#7C3AED", border: "none", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+              className="px-5 py-2.5 bg-white border-none rounded-[10px] text-black text-sm font-bold cursor-pointer whitespace-nowrap hover:bg-gray-200 transition-colors disabled:opacity-50">
               {joining ? "..." : "Join →"}
             </button>
           </div>
-          {joinError && <p style={{ color: "#f47", fontSize: 12, marginTop: 8 }}>{joinError}</p>}
-        </div>
+          {joinError && <p className="text-red-400 text-xs mt-2">{joinError}</p>}
+        </LandingDanceCard>
 
-        {/* Trust bar */}
-        <div style={{ marginTop: 64, display: "flex", gap: 40, flexWrap: "wrap", justifyContent: "center", opacity: 0.5 }}>
-          {["🖥 Interactive Terminal"," Realtime"," 🎥 Built-in Video Calls"," 🤖 AI Coding Assistant","xterm.js"].map(t => (
-            <span key={t} style={{ fontSize: 12, color: "#888" }}>{t}</span>
-          ))}
-        </div>
       </section>
 
       {/* ── FEATURES ── */}
-      <section id="features" style={{ padding: "100px 24px", maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
-          <h2 className="animate-slide-up" style={{ fontSize: "clamp(28px,5vw,48px)", fontWeight: 900, letterSpacing: "-1px" }}>Everything you need to code together</h2>
-          <p className="animate-slide-up delay-100" style={{ color: "#666", marginTop: 14, fontSize: 17 }}>No tabs switching. No plugins. Everything ships in one room.</p>
+      <section id="features" className="py-[100px] px-6 max-w-[1200px] mx-auto bg-black">
+        <div className="text-center mb-16">
+          <h2 className="animate-slide-up text-[clamp(28px,5vw,48px)] font-black tracking-[-1px]">Everything you need to code together</h2>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 20 }}>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-5">
           {FEATURES.map((f, i) => (
-            <div key={i} className="animate-slide-up hover-card-glow" style={{ animationDelay: `${200 + i * 50}ms`, background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 16, padding: 28 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "#7C3AED18", display: "flex", alignItems: "center", justifyContent: "center", color: "#c4b5fd", marginBottom: 16 }}>{f.icon}</div>
-              <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>{f.title}</h3>
-              <p style={{ fontSize: 14, color: "#666", lineHeight: 1.7 }}>{f.desc}</p>
-            </div>
+            <LandingDanceCard
+              key={i}
+              className="animate-slide-up rounded-2xl p-7 min-h-[200px]"
+              delay={i * 0.08}
+              amplitude={1.15}
+            >
+              <div className="w-12 h-12 rounded-xl bg-white/[0.09] flex items-center justify-center text-gray-400 mb-4">{f.icon}</div>
+              <h3 className="text-[17px] font-bold mb-2">{f.title}</h3>
+              <p className="text-sm text-ct-dim leading-[1.7]">{f.desc}</p>
+            </LandingDanceCard>
           ))}
         </div>
       </section>
 
       {/* ── HOW IT WORKS ── */}
-      <section id="how-it-works" style={{ padding: "100px 24px", background: "#0a0a14" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
-          <h2 className="animate-slide-up" style={{ fontSize: "clamp(28px,5vw,48px)", fontWeight: 900, letterSpacing: "-1px", marginBottom: 14 }}>Up and running in 3 steps</h2>
-          <p className="animate-slide-up delay-100" style={{ color: "#666", fontSize: 17, marginBottom: 64 }}>Seriously — under a minute from signup to coding together.</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 32 }}>
+      <section id="how-it-works" className="py-[100px] px-6 bg-black">
+        <div className="max-w-[900px] mx-auto text-center">
+          <h2 className="animate-slide-up text-[clamp(28px,5vw,48px)] font-black tracking-[-1px] mb-16">Up and running in 3 steps</h2>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-8">
             {HOW_IT_WORKS.map((s, i) => (
-              <div key={i} className="animate-slide-up hover-card-glow" style={{ animationDelay: `${200 + i * 100}ms`, textAlign: "left", position: "relative", background: "#10101d", padding: "24px", borderRadius: 16, border: "1px solid #1a1a2e" }}>
-                <div style={{ fontSize: 48, fontWeight: 900, color: "#7C3AED20", lineHeight: 1, marginBottom: 12 }}>{s.step}</div>
-                <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{s.title}</h3>
-                <p style={{ color: "#666", fontSize: 14, lineHeight: 1.8 }}>{s.desc}</p>
-                {i < 2 && <div style={{ position: "absolute", top: 28, right: -20, color: "#333", fontSize: 24 }}>→</div>}
-              </div>
+              <LandingDanceCard
+                key={i}
+                className="animate-slide-up text-left relative p-6 rounded-2xl min-h-[230px]"
+                delay={0.15 + i * 0.12}
+                amplitude={1.2}
+              >
+                <div className="text-5xl font-black text-white/[0.13] leading-none mb-3">{s.step}</div>
+                <h3 className="text-xl font-bold mb-2.5">{s.title}</h3>
+                <p className="text-ct-dim text-sm leading-[1.8]">{s.desc}</p>
+                {i < 2 && <div className="absolute top-7 -right-5 text-ct-subtle text-2xl">→</div>}
+              </LandingDanceCard>
             ))}
           </div>
         </div>
       </section>
 
       {/* ── ACCOUNT TYPES ── */}
-      <section id="account-types" style={{ padding: "100px 24px", maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
-          <h2 className="animate-slide-up" style={{ fontSize: "clamp(28px,5vw,48px)", fontWeight: 900, letterSpacing: "-1px" }}>Built for every kind of coder</h2>
-          <p className="animate-slide-up delay-100" style={{ color: "#666", marginTop: 14, fontSize: 17 }}>Pick your account type — your dashboard and features adapt to you.</p>
+      <section id="account-types" className="py-[100px] px-6 max-w-[1200px] mx-auto">
+        <div className="text-center mb-16">
+          <h2 className="animate-slide-up text-[clamp(28px,5vw,48px)] font-black tracking-[-1px]">Built for every kind of coder</h2>
+          <p className="animate-slide-up [animation-delay:100ms] opacity-0 text-ct-dim mt-3.5 text-[17px]">Pick your account type — your dashboard and features adapt to you.</p>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 20 }}>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-5">
           {ACCOUNT_TYPES.map((a, i) => (
-            <Link key={a.id} href={`/signup?role=${a.id}`} style={{ textDecoration: "none", display: "block" }}>
-              <div className="animate-slide-up hover-card-glow" style={{ animationDelay: `${200 + i * 50}ms`, background: a.bg, border: `1px solid ${a.color}30`, borderRadius: 20, padding: 28, height: "100%" }}>
-                <div className="animate-float" style={{ color: a.color, marginBottom: 14 }}>{a.icon}</div>
-                <h3 style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginBottom: 8 }}>{a.label}</h3>
-                <p style={{ fontSize: 14, color: "#888", lineHeight: 1.7, marginBottom: 20 }}>{a.desc}</p>
-                <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            <LandingDanceCard
+              key={a.id}
+              className="animate-slide-up rounded-[20px] p-7 h-full"
+              delay={0.2 + i * 0.08}
+              amplitude={1.1}
+              onClick={() => router.push(`/signup?role=${a.id}`)}
+            >
+                <div className={`animate-float ${a.color} mb-3.5`}>{a.icon}</div>
+                <h3 className="text-xl font-extrabold text-white mb-2">{a.label}</h3>
+                <p className="text-sm text-ct-muted leading-[1.7] mb-5">{a.desc}</p>
+                <ul className="list-none p-0 flex flex-col gap-2">
                   {a.perks.map(p => (
-                    <li key={p} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#ccc" }}>
-                      <CheckCircle2 size={14} color={a.color}/> {p}
+                    <li key={p} className="flex items-center gap-2 text-[13px] text-gray-300">
+                      <CheckCircle2 size={14} className={a.color}/> {p}
                     </li>
                   ))}
                 </ul>
-                <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 6, color: a.color, fontSize: 14, fontWeight: 700 }}>
+                <div className={`mt-6 flex items-center gap-1.5 ${a.color} text-sm font-bold`}>
                   Get started <ChevronRight size={16}/>
                 </div>
-              </div>
-            </Link>
+            </LandingDanceCard>
           ))}
         </div>
       </section>
 
       {/* ── TESTIMONIALS ── */}
-      <section id="testimonials" style={{ padding: "100px 24px", background: "#0a0a14" }}>
-        <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-          <h2 className="animate-slide-up" style={{ fontSize: "clamp(28px,5vw,48px)", fontWeight: 900, letterSpacing: "-1px", textAlign: "center", marginBottom: 64 }}>Loved by coders worldwide</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 24 }}>
+      <section id="testimonials" className="py-[100px] px-6 bg-black">
+        <div className="max-w-[1000px] mx-auto">
+          <h2 className="animate-slide-up text-[clamp(28px,5vw,48px)] font-black tracking-[-1px] text-center mb-16">Loved by coders worldwide</h2>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-6">
             {TESTIMONIALS.map((t, i) => (
-              <div key={i} className="animate-slide-up hover-card-glow" style={{ animationDelay: `${100 + i * 100}ms`, background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 16, padding: 28 }}>
-                <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-                  {[...Array(5)].map((_, j) => <Star key={j} size={14} fill="#ffd93d" color="#ffd93d"/>)}
+              <LandingDanceCard
+                key={i}
+                className="animate-slide-up rounded-2xl p-7 min-h-[250px]"
+                delay={0.1 + i * 0.12}
+                amplitude={1.05}
+              >
+                <div className="flex gap-1 mb-4">
+                  {[...Array(5)].map((_, j) => <Star key={j} size={14} fill="#ffffff" color="#ffffff"/>)}
                 </div>
-                <p style={{ color: "#ccc", fontSize: 15, lineHeight: 1.8, marginBottom: 20 }}>&quot;{t.quote}&quot;</p>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#60a5fa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: "#fff" }}>{t.avatar}</div>
+                <p className="text-gray-300 text-[15px] leading-[1.8] mb-5">&quot;{t.quote}&quot;</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-[38px] h-[38px] rounded-full bg-gradient-to-br from-white to-gray-400 flex items-center justify-center text-[15px] font-extrabold text-black">{t.avatar}</div>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{t.name}</div>
-                    <div style={{ color: "#555", fontSize: 12 }}>{t.role}</div>
+                    <div className="font-bold text-sm">{t.name}</div>
+                    <div className="text-ct-dimmer text-xs">{t.role}</div>
                   </div>
                 </div>
-              </div>
+              </LandingDanceCard>
             ))}
           </div>
         </div>
       </section>
 
       {/* ── CTA ── */}
-      <section style={{ padding: "100px 24px", textAlign: "center" }}>
-        <div className="animate-scale-in" style={{ maxWidth: 680, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "clamp(28px,5vw,52px)", fontWeight: 900, letterSpacing: "-1.5px", marginBottom: 20 }}>Ready to code together?</h2>
-          <p style={{ color: "#666", fontSize: 17, marginBottom: 40 }}>Join thousands of students, teachers, and teams already using CodeTogether.</p>
-          <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/signup" style={{ padding: "16px 36px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", borderRadius: 14, color: "#fff", fontSize: 17, fontWeight: 800, textDecoration: "none", boxShadow: "0 0 50px rgba(124,58,237,0.4)" }}>
+      <section className="py-[100px] px-6 text-center">
+        <div className="animate-scale-in max-w-[680px] mx-auto">
+          <h2 className="text-[clamp(28px,5vw,52px)] font-black tracking-[-1.5px] mb-5">Ready to code together?</h2>
+          <p className="text-ct-dim text-[17px] mb-10">Join thousands of students, teachers, and teams already using CodeTogether.</p>
+          <div className="flex gap-3.5 justify-center flex-wrap">
+            <Link href="/signup" className="px-9 py-4 bg-gradient-to-br from-white to-gray-300 rounded-[14px] text-black text-[17px] font-extrabold no-underline shadow-glow-white-lg hover:scale-105 transition-transform">
               Create Free Account
             </Link>
-            <Link href="/login" style={{ padding: "16px 28px", background: "transparent", border: "1px solid #333", borderRadius: 14, color: "#ccc", fontSize: 17, textDecoration: "none" }}>
+            <Link href="/login" className="px-7 py-4 bg-transparent border border-ct-subtle rounded-[14px] text-gray-300 text-[17px] no-underline hover:border-gray-500 transition-colors">
               Sign In
             </Link>
           </div>
@@ -289,15 +368,15 @@ export default function Home() {
       </section>
 
       {/* ── FOOTER ── */}
-      <footer style={{ borderTop: "1px solid #111", padding: "40px 24px", textAlign: "center" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
-          <div style={{ fontSize: 22, fontWeight: 900, color: "#7C3AED" }}>Code<span style={{ color: "#c4b5fd" }}>Together</span></div>
-          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", justifyContent: "center" }}>
+      <footer className="border-t border-gray-900 py-10 px-6 text-center">
+        <div className="max-w-[1200px] mx-auto flex flex-col items-center gap-5">
+          <div className="text-[22px] font-black text-white">Code<span className="text-gray-400">Together</span></div>
+          <div className="flex gap-7 flex-wrap justify-center">
             {["Features","How it Works","Account Types","Login","Sign Up"].map(l => (
-              <span key={l} style={{ color: "#555", fontSize: 14, cursor: "pointer" }}>{l}</span>
+              <span key={l} className="text-ct-dimmer text-sm cursor-pointer hover:text-white transition-colors">{l}</span>
             ))}
           </div>
-          <p style={{ color: "#333", fontSize: 13 }}>© 2026 CodeTogether. Built with Next.js · Supabase · WebRTC </p>
+          <p className="text-ct-subtle text-[13px]">© 2026 CodeTogether. Built with Next.js · Supabase · WebRTC </p>
         </div>
       </footer>
 

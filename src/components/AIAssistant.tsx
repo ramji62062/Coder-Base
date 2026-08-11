@@ -1,9 +1,32 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, User, Zap, Code2, Lightbulb, Bug, StopCircle, Trash2, Paperclip, X } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Send, User, Zap, Code2, Lightbulb, Bug, StopCircle, Trash2, Paperclip, X,
+  Copy, Check, Plus, MessageSquarePlus, History, PenLine, FileCode2, StickyNote,
+} from "lucide-react";
+import type { FileItem } from "@/components/FileExplorer";
+import {
+  extractCodeBlocks,
+  extractNoteBlocks,
+  extractWhiteboardBlocks,
+} from "@/lib/ai-response-parser";
 
 type Message = { role: "user" | "assistant"; content: string; ts: number };
+
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+type ChatStore = {
+  sessions: ChatSession[];
+  activeSessionId: string;
+  autoWrite: boolean;
+};
 
 type AttachmentPreview = {
   id: string;
@@ -14,14 +37,26 @@ type AttachmentPreview = {
   kind: "image" | "video" | "file";
 };
 
+const WELCOME: Message = {
+  role: "assistant",
+  content: "Hi! I'm your AI coding assistant with **Auto Generation** mode.\n\n**Enable Auto** and I'll automatically:\n- Write complete, working code to your files\n- Fix bugs and create corrected versions\n- Build entire projects with all files\n- Create architecture diagrams\n\nJust describe what you want to build or fix, and I'll generate the code!",
+  ts: Date.now(),
+};
+
 const QUICK = [
-  { icon: <Bug size={12}/>, label: "Find bugs", prompt: "Review this code and find all bugs:" },
+  { icon: <Bug size={12}/>, label: "Fix bugs", prompt: "Find and fix all bugs in this code. Write the complete corrected version to the file:" },
   { icon: <Lightbulb size={12}/>, label: "Explain", prompt: "Explain what this code does step by step:" },
-  { icon: <Zap size={12}/>, label: "Optimize", prompt: "Optimize this code for better performance:" },
-  { icon: <Code2 size={12}/>, label: "Add types", prompt: "Add TypeScript types to this code:" },
+  { icon: <Zap size={12}/>, label: "Optimize", prompt: "Optimize this code for better performance. Write the complete optimized version to the file:" },
+  { icon: <Code2 size={12}/>, label: "Add types", prompt: "Add TypeScript types to this code. Write the complete typed version to the file:" },
+  { icon: <Plus size={12}/>, label: "Build app", prompt: "Build a complete web application with HTML, CSS, and JavaScript. Create all necessary files with working code:" },
+  { icon: <FileCode2 size={12}/>, label: "Create project", prompt: "Create a complete project with all files. Include HTML, CSS, JavaScript, and make it fully functional:" },
 ];
 
-const TEXT_FILE_EXTENSIONS = new Set([".txt", ".md", ".json", ".yaml", ".yml", ".js", ".jsx", ".ts", ".tsx", ".py", ".java", ".cpp", ".c", ".cs", ".go", ".rs", ".php", ".rb", ".html", ".css", ".scss", ".sql", ".sh", ".bash", ".env", ".ini", ".toml"]);
+const TEXT_FILE_EXTENSIONS = new Set([
+  ".txt", ".md", ".json", ".yaml", ".yml", ".js", ".jsx", ".ts", ".tsx", ".py",
+  ".java", ".cpp", ".c", ".cs", ".go", ".rs", ".php", ".rb", ".html", ".css",
+  ".scss", ".sql", ".sh", ".bash", ".env", ".ini", ".toml",
+]);
 
 function getFileExtension(name: string) {
   const lower = name.toLowerCase();
@@ -30,7 +65,13 @@ function getFileExtension(name: string) {
 }
 
 function isTextFile(attachment: AttachmentPreview) {
-  if (attachment.type.startsWith("text/") || attachment.type.includes("json") || attachment.type.includes("xml") || attachment.type.includes("javascript") || attachment.type.includes("typescript")) {
+  if (
+    attachment.type.startsWith("text/") ||
+    attachment.type.includes("json") ||
+    attachment.type.includes("xml") ||
+    attachment.type.includes("javascript") ||
+    attachment.type.includes("typescript")
+  ) {
     return true;
   }
   return TEXT_FILE_EXTENSIONS.has(getFileExtension(attachment.name));
@@ -45,54 +86,43 @@ function decodeDataUrl(dataUrl: string) {
 
 function buildAttachmentInsights(attachments: AttachmentPreview[]) {
   if (!attachments.length) return "";
-
   return attachments.map((attachment) => {
     if (attachment.kind === "image") {
       return `Image attachment: ${attachment.name} (${attachment.type || "image"}). Describe what is shown and explain it clearly.`;
     }
-
     if (isTextFile(attachment)) {
       try {
         const text = decodeDataUrl(attachment.dataUrl);
-        const snippet = text.slice(0, 12000);
-        return `Attached file: ${attachment.name}\nContent:\n${snippet}`;
+        return `Attached file: ${attachment.name}\nContent:\n${text.slice(0, 12000)}`;
       } catch {
         return `Attached file: ${attachment.name} (${attachment.type || "file"}). Read and analyze its contents if possible.`;
       }
     }
-
-    return `Attached file: ${attachment.name} (${attachment.type || "file"}). Analyze it based on the filename and available metadata; if it is a compressed archive or binary, explain what it likely contains and ask for a clearer extraction if needed.`;
+    return `Attached file: ${attachment.name} (${attachment.type || "file"}). Analyze it based on the filename and available metadata.`;
   }).join("\n\n");
 }
 
-// Mini Robot SVG Logo
 function RobotIcon({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
       <line x1="12" y1="2" x2="12" y2="5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/>
       <circle cx="12" cy="1.5" r="1" fill="#fff"/>
       <rect x="5" y="5" width="14" height="10" rx="3" fill="#fff" fillOpacity="0.95"/>
-      <circle cx="9" cy="10" r="1.8" fill="#7C3AED"/>
-      <circle cx="15" cy="10" r="1.8" fill="#7C3AED"/>
+      <circle cx="9" cy="10" r="1.8" fill="#000"/>
+      <circle cx="15" cy="10" r="1.8" fill="#000"/>
       <circle cx="9.6" cy="9.4" r="0.6" fill="#fff"/>
       <circle cx="15.6" cy="9.4" r="0.6" fill="#fff"/>
-      <rect x="9" y="12.5" width="6" height="1" rx="0.5" fill="#7C3AED" fillOpacity="0.7"/>
+      <rect x="9" y="12.5" width="6" height="1" rx="0.5" fill="#000" fillOpacity="0.7"/>
       <rect x="7" y="16" width="10" height="6" rx="2" fill="#fff" fillOpacity="0.9"/>
       <rect x="3" y="17" width="3" height="4" rx="1.5" fill="#fff" fillOpacity="0.9"/>
       <rect x="18" y="17" width="3" height="4" rx="1.5" fill="#fff" fillOpacity="0.9"/>
-      <rect x="10" y="18" width="4" height="2.5" rx="1" fill="#7C3AED" fillOpacity="0.5"/>
+      <rect x="10" y="18" width="4" height="2.5" rx="1" fill="#000" fillOpacity="0.5"/>
     </svg>
   );
 }
 
 function formatMessageTime(ts: number): string {
-  return new Date(ts).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return new Date(ts).toLocaleString([], { hour: "numeric", minute: "2-digit" });
 }
 
 function parseMessagePayload(content: string) {
@@ -104,29 +134,124 @@ function parseMessagePayload(content: string) {
         attachments: parsed.attachments as AttachmentPreview[],
       };
     }
-  } catch {
-    // fall back to plain text
-  }
+  } catch {}
   return { text: content, attachments: [] as AttachmentPreview[] };
 }
 
-interface AIAssistantProps { currentCode: string; language: string; }
+function getTargetFromFenceHeader(header: string, fallback: string) {
+  const trimmed = header.trim();
+  if (trimmed.startsWith("file:")) return trimmed.slice(5).trim() || fallback;
+  const colon = trimmed.indexOf(":");
+  if (colon > 0) {
+    const maybePath = trimmed.slice(colon + 1).trim();
+    if (maybePath) return maybePath;
+  }
+  return fallback;
+}
 
-export default function AIAssistant({ currentCode, language }: AIAssistantProps) {
-  const [messages, setMessages] = useState<Message[]>([{
-    role: "assistant",
-    content: "👾 Hey! I'm your AI code assistant powered by **Groq**.\n\nI can help you with:\n• **Image understanding** — describe screenshots, diagrams, and UI mockups\n• **Complex code** — write, debug, refactor, and explain code\n• **Docs & files** — read markdown, text files, source code, and attached project files\n\nUpload an image or code/doc file and ask me to analyze it.",
-    ts: Date.now()
-  }]);
+function sessionTitleFromMessages(msgs: Message[]): string {
+  const firstUser = msgs.find((m) => m.role === "user");
+  if (!firstUser) return "New Chat";
+  const text = parseMessagePayload(firstUser.content).text.trim();
+  return text.slice(0, 42) || "New Chat";
+}
+
+function createSession(): ChatSession {
+  const now = Date.now();
+  return {
+    id: `chat_${now}`,
+    title: "New Chat",
+    messages: [{ ...WELCOME, ts: now }],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function loadStore(roomId: string, userId: string): ChatStore {
+  const key = `ai_chats_${roomId}_${userId}`;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as ChatStore;
+      if (parsed.sessions?.length && parsed.activeSessionId) return parsed;
+    }
+  } catch {}
+  const session = createSession();
+  return { sessions: [session], activeSessionId: session.id, autoWrite: false };
+}
+
+function saveStore(roomId: string, userId: string, store: ChatStore) {
+  try {
+    localStorage.setItem(`ai_chats_${roomId}_${userId}`, JSON.stringify(store));
+  } catch {}
+}
+
+type AIAssistantProps = {
+  roomId: string;
+  currentUserId: string;
+  currentCode: string;
+  language: string;
+  activeFile?: string;
+  files?: FileItem[];
+  onFileCreate?: (name: string, content: string) => void;
+  onApplyCode?: (code: string, fileName?: string) => void;
+  onPanelChange?: (panel: string) => void;
+};
+
+export default function AIAssistant({
+  roomId,
+  currentUserId,
+  currentCode,
+  language,
+  activeFile = "file",
+  files = [],
+  onFileCreate,
+  onApplyCode,
+  onPanelChange,
+}: AIAssistantProps) {
+  const [store, setStore] = useState<ChatStore>(() => loadStore(roomId, currentUserId));
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<AttachmentPreview[]>([]);
   const [loading, setLoading] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [attachments, setAttachments] = useState<AttachmentPreview[]>([]);
+  const [activeMediaModal, setActiveMediaModal] = useState<{ url: string; name: string; kind: string } | null>(null);
   const [abortCtrl, setAbortCtrl] = useState<AbortController | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [actionToast, setActionToast] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  const activeSession = store.sessions.find((s) => s.id === store.activeSessionId) || store.sessions[0];
+  const messages = activeSession?.messages || [WELCOME];
+
+  const updateStore = useCallback((updater: (prev: ChatStore) => ChatStore) => {
+    setStore((prev) => {
+      const next = updater(prev);
+      saveStore(roomId, currentUserId, next);
+      return next;
+    });
+  }, [roomId, currentUserId]);
+
+  const setMessages = useCallback((updater: Message[] | ((prev: Message[]) => Message[])) => {
+    updateStore((prev) => {
+      const session = prev.sessions.find((s) => s.id === prev.activeSessionId);
+      if (!session) return prev;
+      const nextMessages = typeof updater === "function" ? updater(session.messages) : updater;
+      const title = session.title === "New Chat" ? sessionTitleFromMessages(nextMessages) : session.title;
+      const sessions = prev.sessions.map((s) =>
+        s.id === prev.activeSessionId
+          ? { ...s, messages: nextMessages, title, updatedAt: Date.now() }
+          : s
+      );
+      return { ...prev, sessions };
+    });
+  }, [updateStore]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -134,11 +259,64 @@ export default function AIAssistant({ currentCode, language }: AIAssistantProps)
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input, attachments]);
 
-  const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    if (!files.length) return;
+  const showToast = (msg: string) => {
+    setActionToast(msg);
+    setTimeout(() => setActionToast(null), 3000);
+  };
 
-    files.forEach((file) => {
+  const applyAutoActions = useCallback((content: string) => {
+    if (!store.autoWrite) return [] as string[];
+
+    const codeBlocks = extractCodeBlocks(content);
+    const appliedFiles: string[] = [];
+    codeBlocks.forEach((block) => {
+      const target = block.fileName || (codeBlocks.length === 1 ? activeFile : "");
+      const code = block.code.trim();
+      if (!target || !code || code.length < 10) return;
+      if (onApplyCode) {
+        onApplyCode(code, target);
+        appliedFiles.push(target);
+      } else if (onFileCreate) {
+        onFileCreate(target || `generated_${Date.now()}.txt`, code);
+        appliedFiles.push(target);
+      }
+    });
+    if (appliedFiles.length) {
+      const fileList = appliedFiles.length > 3 
+        ? `${appliedFiles.slice(0, 3).join(", ")} +${appliedFiles.length - 3} more`
+        : appliedFiles.join(", ");
+      showToast(`Auto-wrote ${appliedFiles.length} file(s): ${fileList}`);
+    } else if (codeBlocks.length) {
+      showToast("Auto skipped code without a clear target file path");
+    }
+
+    const noteBlocks = extractNoteBlocks(content);
+    noteBlocks.forEach((note) => {
+      window.dispatchEvent(new CustomEvent("codetogether:note-create", {
+        detail: { roomId, userId: currentUserId, title: note.title, content: note.content },
+      }));
+    });
+    if (noteBlocks.length) {
+      onPanelChange?.("notes");
+      showToast(`Created ${noteBlocks.length} note(s)`);
+    }
+
+    const wbElements = extractWhiteboardBlocks(content);
+    if (wbElements.length) {
+      window.dispatchEvent(new CustomEvent("codetogether:wb-add", {
+        detail: { roomId, elements: wbElements },
+      }));
+      onPanelChange?.("whiteboard");
+      showToast(`Drew ${wbElements.length} element(s) on whiteboard`);
+    }
+
+    return appliedFiles;
+  }, [store.autoWrite, activeFile, onApplyCode, onFileCreate, roomId, currentUserId, onPanelChange]);
+
+  const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (!selectedFiles.length) return;
+    selectedFiles.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
@@ -157,24 +335,76 @@ export default function AIAssistant({ currentCode, language }: AIAssistantProps)
       };
       reader.readAsDataURL(file);
     });
-
     event.target.value = "";
   };
 
   const removeAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
 
-  async function send(text: string) {
-    const draftText = text.trim();
-    if ((!draftText && attachments.length === 0) || loading) return;
-    const userMsg: Message = {
-      role: "user",
-      content: attachments.length ? JSON.stringify({ text: draftText, attachments: attachments.map((attachment) => ({ ...attachment })) }) : draftText,
-      ts: Date.now(),
-    };
-    const plTs = Date.now() + 1;
-    setMessages((p) => [...p, userMsg, { role: "assistant", content: "▋", ts: plTs }]);
+  const handleSaveAttachmentToWorkspace = (attachment: AttachmentPreview) => {
+    if (!onFileCreate) return;
+    try {
+      onFileCreate(attachment.name, decodeDataUrl(attachment.dataUrl));
+    } catch {
+      onFileCreate(attachment.name, `// Content of ${attachment.name}`);
+    }
+  };
+
+  const startNewChat = () => {
+    const session = createSession();
+    updateStore((prev) => ({
+      ...prev,
+      sessions: [session, ...prev.sessions],
+      activeSessionId: session.id,
+    }));
+    setShowHistory(false);
+  };
+
+  const switchChat = (id: string) => {
+    updateStore((prev) => ({ ...prev, activeSessionId: id }));
+    setShowHistory(false);
+  };
+
+  const deleteChat = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateStore((prev) => {
+      const remaining = prev.sessions.filter((s) => s.id !== id);
+      if (!remaining.length) {
+        const session = createSession();
+        return { ...prev, sessions: [session], activeSessionId: session.id };
+      }
+      return {
+        ...prev,
+        sessions: remaining,
+        activeSessionId: prev.activeSessionId === id ? remaining[0].id : prev.activeSessionId,
+      };
+    });
+  };
+
+  const toggleAutoWrite = () => {
+    updateStore((prev) => ({ ...prev, autoWrite: !prev.autoWrite }));
+  };
+
+  async function send(userPrompt: string) {
+    if ((!userPrompt.trim() && !attachments.length) || loading) return;
+
+    const attachmentInsights = buildAttachmentInsights(attachments);
+    const combinedContent = attachmentInsights
+      ? `${userPrompt.trim()}\n\n[Attachment Details]\n${attachmentInsights}`
+      : userPrompt.trim();
+
+    const payloadContent = attachments.length
+      ? JSON.stringify({ text: userPrompt.trim(), attachments: attachments.map((a) => ({ ...a })) })
+      : userPrompt.trim();
+
+    const userMsg: Message = { role: "user", content: payloadContent, ts: Date.now() };
+    const historyForApi = [
+      ...messages.filter((m) => m.content !== "▋" && !m.content.startsWith("Error:")),
+      { role: "user" as const, content: combinedContent },
+    ];
+
+    setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setAttachments([]);
     setLoading(true);
@@ -182,182 +412,377 @@ export default function AIAssistant({ currentCode, language }: AIAssistantProps)
     const ctrl = new AbortController();
     setAbortCtrl(ctrl);
 
-    const codeCtx = currentCode ? `\nUser's current ${language} code:\n\`\`\`${language}\n${currentCode.slice(0, 2500)}\n\`\`\`` : "";
-    const history = [...messages.slice(-8).map((m) => ({ role: m.role, content: parseMessagePayload(m.content).text }))];
-    const hasImage = attachments.some((attachment) => attachment.kind === "image");
-    const model = hasImage ? "llama-3.2-90b-vision-preview" : "llama-3.3-70b-versatile";
-    const attachmentContext = buildAttachmentInsights(attachments);
-    const userContent = attachments.length
-      ? [
-          { type: "text", text: `${draftText}\n\n${attachmentContext}`.trim() },
-          ...attachments.filter((attachment) => attachment.kind === "image").map((attachment) => ({ type: "image_url", image_url: { url: attachment.dataUrl } })),
-        ]
-      : draftText;
-
     try {
       const res = await fetch("/api/ai-assist", {
-        method: "POST", signal: ctrl.signal,
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model,
-          max_tokens: 2048,
-          messages: [
-            { role: "system", content: `You are an expert coding assistant for CodeTogether. You can understand screenshots, images, code files, documentation, and archived project files. When given attachments, inspect them carefully. For images, describe what is visible in detail. For code and docs, explain, debug, refactor, or generate code. For archives or binary files, infer structure from filenames and metadata when possible. Be concise, practical, and format code with triple backtick blocks.${codeCtx}` },
-            ...history,
-            { role: "user", content: userContent }
-          ]
-        })
+          messages: historyForApi.map((m) => ({ role: m.role, content: m.content })),
+          language,
+          activeFile,
+          autoWrite: store.autoWrite,
+          files: files.map((f) => f.path || f.name).filter(Boolean).slice(0, 30),
+        }),
+        signal: ctrl.signal,
       });
 
       if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`API Error ${res.status}: ${errText.slice(0, 200)}`);
+        const errJson = await res.json().catch(() => ({}));
+        const errMsg = typeof errJson.error === "string" ? errJson.error : (errJson.error?.message || errJson.message || "AI service unavailable.");
+        setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${errMsg}`, ts: Date.now() }]);
+        setLoading(false);
+        return;
       }
-      const data = await res.json();
-      const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't generate a response.";
-      setMessages((p) => p.map((m) => m.ts === plTs ? { ...m, content: reply } : m));
-    } catch (err: any) {
-      const msg = err.name === "AbortError" ? "*(stopped)*" : `⚠️ Error: ${err.message?.slice(0, 200) || "Unknown error"}`;
-      setMessages((p) => p.map((m) => m.ts === plTs ? { ...m, content: msg } : m));
-    } finally { setLoading(false); setAbortCtrl(null); }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let streamText = "";
+      let buffer = "";
+
+      setMessages((prev) => [...prev, { role: "assistant", content: "▋", ts: Date.now() }]);
+
+      while (reader) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === "[DONE]") continue;
+          
+          try {
+            const parsed = JSON.parse(dataStr);
+            const contentDelta = parsed.choices?.[0]?.delta?.content;
+            if (contentDelta && typeof contentDelta === "string") {
+              streamText += contentDelta;
+              setMessages((prev) => {
+                const next = [...prev];
+                next[next.length - 1] = { role: "assistant", content: streamText, ts: Date.now() };
+                return next;
+              });
+            }
+          } catch {}
+        }
+      }
+
+      if (streamText && store.autoWrite) {
+        const appliedFiles = applyAutoActions(streamText);
+        if (appliedFiles.length) {
+          const fileList = appliedFiles.join(", ");
+          setMessages((prev) => {
+            const next = [...prev];
+            next[next.length - 1] = {
+              role: "assistant",
+              content: `Auto Generation completed. Wrote ${appliedFiles.length} file(s) directly to the workspace: ${fileList}.`,
+              ts: Date.now(),
+            };
+            return next;
+          });
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== "AbortError") {
+        setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${err.message || "Request failed."}`, ts: Date.now() }]);
+      }
+    } finally {
+      setLoading(false);
+      setAbortCtrl(null);
+    }
+  }
+
+  function copyText(txt: string, idx: number) {
+    navigator.clipboard.writeText(txt);
+    setCopiedIndex(idx);
+    setTimeout(() => setCopiedIndex(null), 2000);
   }
 
   function fmt(content: string) {
-    const parts = content.split(/(```[\s\S]*?```)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("```")) {
-        const lines = part.split("\n");
-        const lang = lines[0].replace("```", "").trim();
-        const code = lines.slice(1, -1).join("\n");
+    const blocks = content.split(/(```[\s\S]*?```)/g);
+    return blocks.map((b, i) => {
+      if (b.startsWith("```")) {
+        const inner = b.slice(3, -3).trim();
+        const nl = inner.indexOf("\n");
+        const header = nl >= 0 ? inner.slice(0, nl).trim() : inner;
+        const code = nl >= 0 ? inner.slice(nl + 1) : "";
+        const isNote = header.startsWith("note");
+        const isWb = header.startsWith("whiteboard");
+
         return (
-          <div key={i} style={{ margin: "8px 0", borderRadius: 8, overflow: "hidden", border: "1px solid #2a2a2a" }}>
-            {lang && <div style={{ padding: "3px 10px", background: "#1a1a2e", fontSize: 10, color: "#555", borderBottom: "1px solid #222" }}>{lang}</div>}
-            <pre style={{ margin: 0, padding: "10px 12px", background: "#0d0d0d", overflowX: "auto", fontSize: 12, lineHeight: 1.6, color: "#e0e0e0" }}><code>{code}</code></pre>
+          <div key={i} className="my-2 rounded-lg border border-gray-800 bg-black overflow-hidden text-xs">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[#0a0a0a] border-b border-gray-800 text-gray-400">
+              <span className="font-mono text-[11px] uppercase text-white font-bold flex items-center gap-1">
+                {isNote ? <StickyNote size={10}/> : isWb ? <PenLine size={10}/> : <FileCode2 size={10}/>}
+                {header || "code"}
+              </span>
+              <div className="flex items-center gap-2">
+                {!isNote && !isWb && onApplyCode && (
+                  <button
+                    onClick={() => {
+                      const fileName = getTargetFromFenceHeader(header, activeFile);
+                      onApplyCode(code, fileName || activeFile);
+                      showToast(`Applied to ${fileName || activeFile}`);
+                    }}
+                    className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white text-[10px] cursor-pointer font-bold flex items-center gap-1 hover:bg-white/20"
+                  >
+                    <PenLine size={10}/> Apply
+                  </button>
+                )}
+                {onFileCreate && !isNote && !isWb && (
+                  <button
+                    onClick={() => {
+                      const ext = header.split(":")[0] || "txt";
+                      const fileName = getTargetFromFenceHeader(header, `generated_${Date.now().toString().slice(-4)}.${ext}`);
+                      onFileCreate(fileName, code);
+                      showToast(`Added ${fileName}`);
+                    }}
+                    className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white text-[10px] cursor-pointer font-bold flex items-center gap-1 hover:bg-white/20"
+                  >
+                    <Plus size={10}/> Add
+                  </button>
+                )}
+                <button onClick={() => copyText(code, i)} className="bg-transparent border-none text-gray-400 cursor-pointer flex items-center gap-1 hover:text-white">
+                  {copiedIndex === i ? <Check size={11} className="text-white"/> : <Copy size={11}/>}
+                  <span>{copiedIndex === i ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+            </div>
+            <pre className="p-3 m-0 overflow-x-auto font-mono text-[12px] leading-relaxed text-gray-200 bg-black">
+              <code>{code}</code>
+            </pre>
           </div>
         );
       }
-      const html = part
-        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-        .replace(/`([^`]+)`/g, '<code style="background:#1a1a2e;padding:1px 5px;border-radius:3px;font-size:11.5px;color:#c4b5fd;font-family:monospace">$1</code>');
-      return <span key={i} dangerouslySetInnerHTML={{ __html: html.replace(/\n/g, "<br/>") }} />;
+      return <span key={i} className="whitespace-pre-wrap">{b}</span>;
     });
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0d0d0d", color: "#e0e0e0", fontFamily: "Inter, sans-serif" }}>
-      <div style={{ padding: "12px 14px", borderBottom: "1px solid #1a1a1a", display: "flex", alignItems: "center", gap: 10, background: "#111", flexShrink: 0 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 0 12px rgba(124,58,237,0.4)" }}>
-          <RobotIcon size={20}/>
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>AI Code Assistant</div>
-          <div style={{ fontSize: 10, color: "#666" }}>Groq · LLaMA 3 70B · {language}</div>
-        </div>
-        <button onClick={() => setMessages((m) => [m[0]])} title="Clear chat" style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4 }}>
-          <Trash2 size={13}/>
-        </button>
-      </div>
-
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-        {messages.map((msg, i) => {
-          const { text: messageText, attachments: messageAttachments } = parseMessagePayload(msg.content);
-          return (
-            <div key={i} style={{ padding: "6px 12px 4px" }}>
-              <div style={{ display: "flex", gap: 8, flexDirection: msg.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
-                <div style={{ width: 26, height: 26, borderRadius: "50%", background: msg.role === "user" ? "#7C3AED" : "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: msg.role === "assistant" ? "0 0 8px rgba(124,58,237,0.3)" : "none" }}>
-                  {msg.role === "user" ? <User size={12} color="#fff"/> : <RobotIcon size={14}/>} 
-                </div>
-                <div style={{ maxWidth: "88%", fontSize: 13, lineHeight: 1.6, padding: "8px 12px", borderRadius: msg.role === "user" ? "14px 4px 14px 14px" : "4px 14px 14px 14px", background: msg.role === "user" ? "#7C3AED22" : "#111", border: `1px solid ${msg.role === "user" ? "#7C3AED33" : "#1a1a1a"}` }}>
-                  {msg.content === "▋" ? <span style={{ animation: "blink 1s infinite" }}>▋</span> : (
-                    <>
-                      {messageAttachments.length > 0 && (
-                        <div style={{ display: "grid", gap: 6, marginBottom: 6 }}>
-                          {messageAttachments.map((attachment) => (
-                            <div key={attachment.id || attachment.name} style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, overflow: "hidden", background: "rgba(0,0,0,0.18)" }}>
-                              {attachment.kind === "image" ? (
-                                <img src={attachment.dataUrl} alt={attachment.name} style={{ display: "block", maxWidth: "100%", maxHeight: 180, objectFit: "cover" }} />
-                              ) : attachment.kind === "video" ? (
-                                <video src={attachment.dataUrl} controls style={{ display: "block", width: "100%", maxHeight: 180, background: "#000" }} />
-                              ) : (
-                                <div style={{ padding: "8px 10px", display: "flex", alignItems: "center", gap: 8, color: "#c4b5fd" }}>
-                                  <span>📎</span>
-                                  <span style={{ fontSize: 12 }}>{attachment.name}</span>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {messageText ? fmt(messageText) : null}
-                      <div style={{ fontSize: 10, color: "#666", marginTop: 6 }}>{formatMessageTime(msg.ts)}</div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef}/>
-      </div>
-
-      {!loading && (
-        <div style={{ padding: "6px 10px", display: "flex", gap: 5, flexWrap: "wrap", borderTop: "1px solid #1a1a1a", flexShrink: 0 }}>
-          {QUICK.map((a) => (
-            <button key={a.label} onClick={() => send(`${a.prompt}\n\`\`\`${language}\n${currentCode.slice(0, 2000)}\n\`\`\``)}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 9px", background: "#111", border: "1px solid #222", borderRadius: 20, cursor: "pointer", fontSize: 11, color: "#777", transition: "all 0.15s" }}
-              onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#7C3AED"; (e.currentTarget as HTMLElement).style.color = "#c4b5fd"; }}
-              onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "#222"; (e.currentTarget as HTMLElement).style.color = "#777"; }}>
-              {a.icon} {a.label}
+    <div className="flex h-full bg-black text-gray-200 font-inter">
+      {/* Chat history sidebar */}
+      {showHistory && (
+        <div className="w-[200px] shrink-0 border-r border-gray-900 bg-[#050505] flex flex-col">
+          <div className="px-3 py-2 border-b border-gray-900 flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Chat History</span>
+            <button onClick={() => setShowHistory(false)} className="bg-transparent border-none text-gray-500 cursor-pointer hover:text-white">
+              <X size={12}/>
             </button>
-          ))}
-        </div>
-      )}
-
-      <div style={{ padding: "10px 12px", borderTop: "1px solid #1a1a1a", background: "#111", flexShrink: 0 }}>
-        {attachments.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-            {attachments.map((attachment) => (
-              <div key={attachment.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 999, background: "rgba(124,58,237,0.16)", color: "#d8b4fe", fontSize: 11 }}>
-                <span>{attachment.name}</span>
-                <button onClick={() => removeAttachment(attachment.id)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0 }}>
-                  <X size={12} />
+          </div>
+          <button
+            onClick={startNewChat}
+            className="mx-2 mt-2 mb-1 flex items-center gap-1.5 px-2.5 py-1.5 bg-white text-black rounded-lg border-none cursor-pointer text-[11px] font-bold hover:bg-gray-200"
+          >
+            <MessageSquarePlus size={12}/> New Chat
+          </button>
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
+            {store.sessions.map((s) => (
+              <div
+                key={s.id}
+                onClick={() => switchChat(s.id)}
+                className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer mb-0.5 text-[11px] ${
+                  s.id === store.activeSessionId ? "bg-white/15 text-white" : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
+                }`}
+              >
+                <span className="flex-1 truncate">{s.title}</span>
+                <button
+                  onClick={(e) => deleteChat(s.id, e)}
+                  className="opacity-0 group-hover:opacity-100 bg-transparent border-none text-gray-500 cursor-pointer p-0 hover:text-red-400"
+                >
+                  <Trash2 size={10}/>
                 </button>
               </div>
             ))}
           </div>
-        )}
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: "8px 10px" }}>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{ background: "none", border: "none", color: "#858585", cursor: "pointer", fontSize: 16, padding: "2px 4px", lineHeight: 1 }}
-            title="Attach image, video or file"
-          >
-            <Paperclip size={15} />
-          </button>
-          <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,.pdf,.txt,.doc,.docx,.zip" onChange={handleFileSelection} style={{ display: "none" }} />
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
-            placeholder="Ask about your code... (Enter to send, Shift+Enter newline)"
-            rows={1}
-            style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: "#e0e0e0", fontSize: 13, resize: "none", lineHeight: 1.5, maxHeight: 120, overflowY: "auto", fontFamily: "inherit" }}
-          />
-          {loading ? (
-            <button onClick={() => abortCtrl?.abort()} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer", background: "#f4474720", color: "#f47", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <StopCircle size={14}/>
-            </button>
-          ) : (
-            <button onClick={() => send(input)} disabled={!input.trim() && attachments.length === 0} style={{ width: 30, height: 30, borderRadius: 8, border: "none", cursor: input.trim() || attachments.length ? "pointer" : "default", background: input.trim() || attachments.length ? "#7C3AED" : "#222", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
-              <Send size={13}/>
-            </button>
-          )}
         </div>
-        <p style={{ fontSize: 10, color: "#333", marginTop: 5, textAlign: "center" }}>Add GROQ_API_KEY to .env.local</p>
+      )}
+
+      <div className="flex flex-col flex-1 min-w-0 h-full bg-black">
+        {/* Header */}
+        <div className="px-3 py-2 bg-black border-b border-gray-900 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <button onClick={() => setShowHistory((v) => !v)} title="Chat history" className="bg-transparent border-none text-gray-400 cursor-pointer p-1 hover:text-white">
+              <History size={14}/>
+            </button>
+            <div className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
+              <RobotIcon size={12}/>
+            </div>
+            <span className="text-xs font-black tracking-wider text-white uppercase truncate">{activeSession?.title || "AI Assistant"}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={toggleAutoWrite}
+              title={store.autoWrite ? "Auto Generation ON — AI writes complete code automatically" : "Enable Auto Generation — AI will write complete working code"}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold cursor-pointer transition-colors ${
+                store.autoWrite
+                  ? "bg-white text-black border-white"
+                  : "bg-transparent text-gray-400 border-gray-700 hover:border-white hover:text-white"
+              }`}
+            >
+              <PenLine size={10}/> {store.autoWrite ? "⚡ Auto ON" : "Auto OFF"}
+            </button>
+            <button onClick={startNewChat} title="New chat" className="bg-transparent border-none text-gray-400 cursor-pointer p-1 hover:text-white">
+              <MessageSquarePlus size={14}/>
+            </button>
+          </div>
+        </div>
+
+        {actionToast && (
+          <div className="px-3 py-1.5 bg-white/10 border-b border-white/20 text-[11px] text-white text-center shrink-0">
+            {actionToast}
+          </div>
+        )}
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-[8px_0] bg-black">
+          {messages.map((msg, i) => {
+            const { text: messageText, attachments: messageAttachments } = parseMessagePayload(msg.content);
+            const isErr = messageText.startsWith("Error:");
+
+            return (
+              <div key={i} className="px-3 py-1.5">
+                <div className={`flex gap-2 items-start ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                  <div className={`w-[26px] h-[26px] rounded-full flex items-center justify-center shrink-0 ${
+                    msg.role === "user" ? "bg-white text-black" : "bg-gray-800 text-white"
+                  }`}>
+                    {msg.role === "user" ? <User size={12}/> : <RobotIcon size={14}/>}
+                  </div>
+                  <div className={`max-w-[88%] text-[13px] leading-relaxed px-3.5 py-2.5 border ${
+                    isErr
+                      ? "bg-red-500/10 border-red-500/30 text-red-400 rounded-lg"
+                      : msg.role === "user"
+                        ? "bg-white/10 border-white/20 text-white rounded-[14px_4px_14px_14px]"
+                        : "bg-[#0a0a0a] border-gray-800 text-gray-200 rounded-[4px_14px_14px_14px]"
+                  }`}>
+                    {msg.content === "▋" ? <span className="animate-pulse">▋</span> : (
+                      <>
+                        {messageAttachments.length > 0 && (
+                          <div className="grid gap-1.5 mb-1.5">
+                            {messageAttachments.map((attachment) => (
+                              <div key={attachment.id || attachment.name} className="border border-gray-800 rounded-lg overflow-hidden bg-black">
+                                {attachment.kind === "image" ? (
+                                  <img
+                                    src={attachment.dataUrl}
+                                    alt={attachment.name}
+                                    onClick={() => setActiveMediaModal({ url: attachment.dataUrl, name: attachment.name, kind: attachment.kind })}
+                                    className="block max-w-full max-h-[180px] object-cover cursor-pointer"
+                                  />
+                                ) : attachment.kind === "video" ? (
+                                  <video src={attachment.dataUrl} controls className="block w-full max-h-[180px] bg-black"/>
+                                ) : (
+                                  <div className="p-[8px_10px] flex items-center justify-between gap-2">
+                                    <span className="text-[12px] font-semibold">{attachment.name}</span>
+                                    {onFileCreate && isTextFile(attachment) && (
+                                      <button
+                                        onClick={() => handleSaveAttachmentToWorkspace(attachment)}
+                                        className="bg-white/20 border border-white text-white rounded px-1.5 py-0.5 text-[10px] cursor-pointer font-bold flex items-center gap-1"
+                                      >
+                                        <Plus size={10}/> Add
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {messageText ? fmt(messageText) : null}
+                        <div className="text-[10px] text-gray-600 mt-1.5">{formatMessageTime(msg.ts)}</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={bottomRef}/>
+        </div>
+
+        {/* Quick prompts */}
+        {!loading && (
+          <div className="p-[6px_10px] flex gap-1.5 flex-wrap border-t border-gray-900 bg-black shrink-0">
+            {QUICK.map((a) => (
+              <button
+                key={a.label}
+                onClick={() => send(`${a.prompt}\nTarget file: ${activeFile}`)}
+                className="flex items-center gap-1 px-2.5 py-1 bg-[#0f0f0f] border border-gray-800 rounded-full cursor-pointer text-[11px] text-gray-400 hover:border-white hover:text-white transition-colors"
+              >
+                {a.icon} {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="p-[10px_12px] border-t border-gray-900 bg-black shrink-0">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {attachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/15 text-gray-200 text-[11px]">
+                  <span>{attachment.name}</span>
+                  <button onClick={() => removeAttachment(attachment.id)} className="bg-transparent border-none text-inherit cursor-pointer p-0">
+                    <X size={12}/>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2 items-end bg-[#0a0a0a] border border-gray-800 rounded-xl p-[8px_10px] focus-within:border-gray-500 transition-colors">
+            <button onClick={() => fileInputRef.current?.click()} className="bg-transparent border-none text-gray-400 cursor-pointer p-[2px_4px] hover:text-white">
+              <Paperclip size={15}/>
+            </button>
+            <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,.pdf,.txt,.doc,.docx,.zip" onChange={handleFileSelection} className="hidden"/>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
+              placeholder="Describe what you want to build or fix... (Enter to send)"
+              rows={1}
+              className="flex-1 bg-transparent border-none outline-none text-white text-[13px] resize-none leading-relaxed max-h-[120px] overflow-y-auto font-sans"
+            />
+            {loading ? (
+              <button onClick={() => abortCtrl?.abort()} className="w-[30px] h-[30px] rounded-lg border-none cursor-pointer bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+                <StopCircle size={14}/>
+              </button>
+            ) : (
+              <button
+                onClick={() => send(input)}
+                disabled={!input.trim() && attachments.length === 0}
+                className="w-[30px] h-[30px] rounded-lg border-none cursor-pointer bg-white text-black flex items-center justify-center shrink-0 disabled:opacity-30 hover:bg-gray-200 font-bold"
+              >
+                <Send size={13}/>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <style>{`@keyframes blink { 0%,100% { opacity:1 } 50% { opacity:0 } }`}</style>
+      {/* Media modal */}
+      {activeMediaModal && (
+        <div className="fixed inset-0 z-[9999999] bg-black/90 backdrop-blur-[12px] flex items-center justify-center p-5" onClick={() => setActiveMediaModal(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="max-w-[90vw] max-h-[85vh] bg-[#0a0a0a] border border-gray-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            <div className="px-4 py-2.5 bg-[#121212] flex items-center justify-between border-b border-gray-800">
+              <span className="text-[13px] font-bold text-white">{activeMediaModal.name}</span>
+              <button onClick={() => setActiveMediaModal(null)} className="bg-transparent border-none text-gray-400 cursor-pointer hover:text-white">
+                <X size={16}/>
+              </button>
+            </div>
+            <div className="p-3 flex items-center justify-center bg-black flex-1 overflow-auto">
+              {activeMediaModal.kind === "image" ? (
+                <img src={activeMediaModal.url} alt={activeMediaModal.name} className="max-w-full max-h-[75vh] object-contain rounded-lg"/>
+              ) : (
+                <video src={activeMediaModal.url} controls autoPlay className="max-w-full max-h-[75vh] rounded-lg"/>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -39,63 +39,59 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080810", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Inter, sans-serif" }}>
-      <div className="animate-pulse-glow" style={{ position: "fixed", top: "30%", left: "50%", transform: "translateX(-50%)", width: 400, height: 400, background: "radial-gradient(ellipse,rgba(124,58,237,0.15) 0%,transparent 70%)", pointerEvents: "none" }} />
-      <div className="animate-float" style={{ position: "fixed", top: "20%", left: "30%", width: 200, height: 200, background: "radial-gradient(ellipse,rgba(96,165,250,0.1) 0%,transparent 70%)", pointerEvents: "none" }} />
+    <div className="min-h-screen bg-ct-dark flex items-center justify-center p-6 font-inter text-gray-200">
+      <div className="animate-pulse-glow fixed top-[30%] left-1/2 -translate-x-1/2 w-[400px] h-[400px] bg-[radial-gradient(ellipse,rgba(255,255,255,0.12)_0%,transparent_70%)] pointer-events-none" />
+      <div className="animate-float fixed top-[20%] left-[30%] w-[200px] h-[200px] bg-[radial-gradient(ellipse,rgba(200,200,200,0.08)_0%,transparent_70%)] pointer-events-none" />
 
-      <div className="animate-scale-in" style={{ width: "100%", maxWidth: 440, position: "relative" }}>
-        <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#555", textDecoration: "none", fontSize: 14, marginBottom: 32 }}>
+      <div className="animate-scale-in w-full max-w-[440px] relative">
+        <Link href="/" className="inline-flex items-center gap-1.5 text-gray-400 no-underline text-sm mb-8 hover:text-white transition-colors">
           <ChevronLeft size={16}/> Back to home
         </Link>
 
-        <div className="glass-panel" style={{ borderRadius: 24, padding: "36px 32px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Code2 size={22} color="#fff"/>
+        <div className="glass-panel rounded-[24px] p-[36px_32px]">
+          <div className="flex items-center gap-3 mb-7">
+            <div className="w-[44px] h-[44px] rounded-xl bg-gradient-to-br from-white to-gray-300 flex items-center justify-center">
+              <Code2 size={22} className="text-black"/>
             </div>
             <div>
-              <h1 style={{ fontSize: 24, fontWeight: 900, color: "#fff", letterSpacing: "-0.5px" }}>Welcome back</h1>
-              <p style={{ color: "#555", fontSize: 13 }}>Sign in to CodeTogether</p>
+              <h1 className="text-2xl font-black text-white tracking-tight">Welcome back</h1>
+              <p className="text-ct-dim text-xs">Sign in to CodeTogether</p>
             </div>
           </div>
 
-          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <form onSubmit={handleLogin} className="flex flex-col gap-4">
             <div>
-              <label style={{ fontSize: 12, color: "#666", fontWeight: 600, display: "block", marginBottom: 6 }}>Email Address</label>
+              <label className="text-xs text-gray-400 font-semibold block mb-1.5">Email Address</label>
               <input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="you@example.com" required
-                style={{ width: "100%", background: "#111", border: "1.5px solid #222", borderRadius: 10, padding: "11px 14px", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" }}
-                onFocus={e => (e.target.style.borderColor = "#7C3AED")}
-                onBlur={e => (e.target.style.borderColor = "#222")}
+                className="w-full bg-[#111111] border border-ct-subtle rounded-xl p-[11px_14px] text-white text-sm outline-none focus:border-white transition-colors box-border"
               />
             </div>
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                <label style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Password</label>
-                <span style={{ fontSize: 12, color: "#7C3AED", cursor: "pointer" }}>Forgot password?</span>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-xs text-gray-400 font-semibold">Password</label>
+                <span className="text-xs text-gray-300 hover:text-white cursor-pointer transition-colors">Forgot password?</span>
               </div>
-              <div style={{ position: "relative" }}>
+              <div className="relative">
                 <input value={password} onChange={e => setPassword(e.target.value)} type={showPw ? "text" : "password"} placeholder="••••••••" required
-                  style={{ width: "100%", background: "#111", border: "1.5px solid #222", borderRadius: 10, padding: "11px 44px 11px 14px", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" }}
-                  onFocus={e => (e.target.style.borderColor = "#7C3AED")}
-                  onBlur={e => (e.target.style.borderColor = "#222")}
+                  className="w-full bg-[#111111] border border-ct-subtle rounded-xl p-[11px_44px_11px_14px] text-white text-sm outline-none focus:border-white transition-colors box-border"
                 />
-                <button type="button" onClick={() => setShowPw(!showPw)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#555", cursor: "pointer" }}>
+                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 bg-transparent border-none text-gray-400 cursor-pointer hover:text-white">
                   {showPw ? <EyeOff size={16}/> : <Eye size={16}/>}
                 </button>
               </div>
             </div>
 
-            {error && <div style={{ background: "#f4474714", border: "1px solid #f4474744", borderRadius: 8, padding: "10px 14px", color: "#f47", fontSize: 13 }}>{error}</div>}
+            {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-[10px_14px] text-red-400 text-xs">{error}</div>}
 
             <button type="submit" disabled={loading}
-              style={{ marginTop: 4, padding: 13, background: loading ? "#333" : "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 10, color: "#fff", fontSize: 15, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
+              className="mt-1 p-3.5 bg-gradient-to-br from-white to-gray-300 border-none rounded-xl text-black text-sm font-extrabold cursor-pointer hover:bg-gray-200 transition-colors disabled:opacity-50">
               {loading ? "Signing in..." : "Sign In →"}
             </button>
           </form>
 
-          <p style={{ textAlign: "center", color: "#555", fontSize: 13, marginTop: 20 }}>
+          <p className="text-center text-ct-dim text-xs mt-5">
             Don&apos;t have an account?{" "}
-            <Link href="/signup" style={{ color: "#7C3AED", fontWeight: 700, textDecoration: "none" }}>Sign up free</Link>
+            <Link href="/signup" className="text-white font-bold no-underline hover:underline">Sign up free</Link>
           </p>
         </div>
       </div>
