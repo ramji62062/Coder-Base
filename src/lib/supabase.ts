@@ -30,6 +30,11 @@ function createFallbackSupabaseClient() {
       signInWithPassword: async () => ({ data: null, error: null }),
       signUp: async () => ({ data: null, error: null }),
       signOut: async () => ({ error: null }),
+      resetPasswordForEmail: async () => ({ data: null, error: null }),
+      updateUser: async () => ({ data: { user: null }, error: null }),
+      exchangeCodeForSession: async () => ({ data: { session: null }, error: null }),
+      setSession: async () => ({ data: { session: null }, error: null }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
     from: () => makeQuery(),
     channel: () => ({
@@ -46,5 +51,5 @@ const normalizedUrl = rawSupabaseUrl
   : "https://placeholder.supabase.co";
 
 export const supabase = rawSupabaseUrl && supabaseAnonKey
-  ? createClient(normalizedUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  ? createClient(normalizedUrl, supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } })
   : createFallbackSupabaseClient() as any;

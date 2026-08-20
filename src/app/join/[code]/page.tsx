@@ -109,7 +109,7 @@ export default function JoinByCodePage() {
               value={accessCode}
               onChange={(e) => setAccessCode(e.target.value)}
               placeholder="Required for private rooms"
-              className="mt-2 w-full rounded-lg border border-[#2a2a2a] bg-[#0b0b0b] px-3 py-2 text-white outline-none focus:border-[#7C3AED]"
+              className="mt-2 w-full rounded-lg border border-[#2a2a2a] bg-[#0b0b0b] px-3 py-2 text-white outline-none focus:border-white"
             />
 
             {error ? <p className="mt-4 text-sm text-red-400">{error}</p> : null}
@@ -117,7 +117,7 @@ export default function JoinByCodePage() {
             <button
               onClick={joinRoom}
               disabled={joining}
-              className="mt-5 rounded-lg bg-[#7C3AED] px-5 py-2 font-semibold transition hover:bg-[#6d28d9] disabled:opacity-70"
+              className="mt-5 rounded-lg bg-white px-5 py-2 font-semibold transition hover:bg-[#6d28d9] disabled:opacity-70"
             >
               {joining ? "Joining..." : "Join Room"}
             </button>
@@ -163,7 +163,7 @@ function GuestJoinSection({
         value={displayName}
         onChange={(event) => setDisplayName(event.target.value)}
         placeholder="Display name (or we generate one)"
-        className="mt-3 w-full rounded-lg border border-[#2a2a2a] bg-[#101010] px-3 py-2 outline-none focus:border-[#7C3AED]"
+        className="mt-3 w-full rounded-lg border border-[#2a2a2a] bg-[#101010] px-3 py-2 outline-none focus:border-white"
       />
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { io, type Socket } from "socket.io-client";
 import {
@@ -29,6 +30,7 @@ type ParticipantsCallPanelProps = {
   onAddToast?: (msg: string, type?: "info" | "error" | "success") => void;
   isCallJoined: boolean;
   onCallJoinedChange: (val: boolean) => void;
+  isDocked?: boolean;
 };
 
 type ConnState = "idle" | "joining" | "joined" | "error";
@@ -132,7 +134,7 @@ function ensureStyles() {
     .pcp-member-row { transition: background 0.15s; }
     .pcp-member-row:hover { background: rgba(255,255,255,0.06) !important; }
     .pcp-dropdown-item { transition: background 0.1s; }
-    .pcp-dropdown-item:hover { background: #094771 !important; }
+    .pcp-dropdown-item:hover { background: #000000 !important; }
   `;
   document.head.appendChild(style);
 }
@@ -144,6 +146,7 @@ export default function ParticipantsCallPanel({
   isHost = false, hostUserId = "", onAddToast,
   isCallJoined,
   onCallJoinedChange,
+  isDocked = true,
 }: ParticipantsCallPanelProps) {
   const [connState, setConnState] = useState<ConnState>("idle");
   const [error, setError] = useState("");
@@ -157,10 +160,15 @@ export default function ParticipantsCallPanel({
   const [floatingPos, setFloatingPos] = useState<{ x: number; y: number } | null>(null);
   const [floatingSize, setFloatingSize] = useState<{ w: number; h: number }>({ w: 480, h: 330 });
   const [isFloatingMinimized, setIsFloatingMinimized] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; posX: number; posY: number }>({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
   const isResizingRef = useRef(false);
   const resizeStartRef = useRef<{ mouseX: number; mouseY: number; startW: number; startH: number }>({ mouseX: 0, mouseY: 0, startW: 480, startH: 330 });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     if (isFullscreen) return;
@@ -272,6 +280,10 @@ export default function ParticipantsCallPanel({
     onCallJoinedChange(joined);
     joinedRef.current = joined;
   }, [joined, onCallJoinedChange]);
+
+  useEffect(() => {
+    if (!isDocked && joined) setIsFloatingMinimized(false);
+  }, [isDocked, joined]);
 
   useEffect(() => {
     localStateRef.current = { micOn, cameraOn, screenOn };
@@ -1090,7 +1102,18 @@ export default function ParticipantsCallPanel({
   const hasPinned = pinnedTile && tiles.length > 1 && tiles[0]?.socketId === pinnedTile;
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: "#151515" }}>
+    <div style={{
+      height: isDocked ? "100%" : 0,
+      width: isDocked ? "100%" : 0,
+      position: isDocked ? "relative" : "fixed",
+      left: isDocked ? undefined : -10000,
+      top: isDocked ? undefined : 0,
+      display: "flex",
+      flexDirection: "column",
+      overflow: isDocked ? "hidden" : "visible",
+      background: isDocked ? "#151515" : "transparent",
+      pointerEvents: isDocked ? "auto" : "none",
+    }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid #222", background: "#1c1c1c" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>
@@ -1141,7 +1164,7 @@ export default function ParticipantsCallPanel({
                     <button onClick={startMeeting} style={primaryBtn("#22c55e")}>
                       <PhoneCall size={13} /> Join Call
                     </button>
-                    <button onClick={handleScreenBtn} style={primaryBtn("#7C3AED")}>
+                    <button onClick={handleScreenBtn} style={primaryBtn("#000000")}>
                       <ScreenShare size={13} /> Share Screen
                     </button>
                   </div>
@@ -1179,8 +1202,8 @@ export default function ParticipantsCallPanel({
                 </div>
               )}
 
-              {/* Floating Call Overlay Window (Draggable, Minimizable, Maximizable) */}
-              {joined && (
+              {/* Floating Call Overlay Window (Rendered at Root Portal to avoid parent clipping/transforms) */}
+              {joined && mounted && typeof document !== "undefined" && createPortal(
                 isFloatingMinimized ? (
                   /* ── Minimized Floating Call Pill ── */
                   <div
@@ -1201,6 +1224,7 @@ export default function ParticipantsCallPanel({
                       cursor: "move",
                       userSelect: "none",
                       animation: "pcp-fadeIn 0.2s ease-out",
+                      pointerEvents: "auto",
                     }}
                     onMouseDown={handleDragMouseDown}
                   >
@@ -1208,15 +1232,15 @@ export default function ParticipantsCallPanel({
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <div style={{
                         width: 26, height: 26, borderRadius: "50%",
-                        background: "linear-gradient(135deg,#7C3AED,#5b21b6)",
+                        background: "linear-gradient(135deg,#ffffff,#cccccc)",
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        color: "#fff", fontSize: 10, fontWeight: 700,
+                          color: "#000", fontSize: 10, fontWeight: 700,
                         border: micOn ? "2px solid #22c55e" : "1px solid #444"
                       }}>
                         {currentUserName.slice(0, 2).toUpperCase()}
                       </div>
                       <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Call</span>
-                      <span style={{ fontSize: 10, background: "#7C3AED33", color: "#c4b5fd", padding: "1px 6px", borderRadius: 10, display: "flex", alignItems: "center", gap: 3 }}>
+                      <span style={{ fontSize: 10, background: "#ffffff33", color: "#ffffff", padding: "1px 6px", borderRadius: 10, display: "flex", alignItems: "center", gap: 3 }}>
                         <Users size={10} /> {totalInCall}
                       </span>
                     </div>
@@ -1228,7 +1252,10 @@ export default function ParticipantsCallPanel({
                       <button onClick={handleCameraBtn} title={cameraOn ? "Stop Video" : "Start Video"} style={{ background: cameraOn ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)", border: cameraOn ? "1px solid #22c55e" : "1px solid #ef4444", borderRadius: 12, padding: "4px 8px", color: cameraOn ? "#22c55e" : "#ef4444", cursor: "pointer", display: "flex", alignItems: "center" }}>
                         {cameraOn ? <Video size={12} /> : <VideoOff size={12} />}
                       </button>
-                      <button onClick={() => setIsFloatingMinimized(false)} title="Maximize call window" style={{ background: "rgba(124, 58, 237, 0.2)", border: "1px solid #7C3AED", borderRadius: 12, padding: "4px 8px", color: "#c4b5fd", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                      <button onClick={handleScreenBtn} title={screenOn ? "Stop sharing" : "Share Screen"} style={{ background: screenOn ? "rgba(138, 43, 226, 0.15)" : "rgba(0, 0, 0, 0.6)", border: screenOn ? "1px solid #c084fc" : "1px solid #333", borderRadius: 12, padding: "4px 8px", color: screenOn ? "#c084fc" : "#000000", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                        <ScreenShare size={12} />
+                      </button>
+                      <button onClick={() => setIsFloatingMinimized(false)} title="Maximize call window" style={{ background: "rgba(124, 58, 237, 0.2)", border: "1px solid #ffffff", borderRadius: 12, padding: "4px 8px", color: "#ffffff", cursor: "pointer", display: "flex", alignItems: "center" }}>
                         <Maximize2 size={12} />
                       </button>
                       <button onClick={leaveCall} title="Leave call" style={{ background: "#ea4335", border: "none", borderRadius: 12, padding: "4px 8px", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center" }}>
@@ -1239,7 +1266,7 @@ export default function ParticipantsCallPanel({
                 ) : (
                   /* ── Maximized / Floating Video Grid Container Window ── */
                   <div style={{
-                    position: isFullscreen ? "fixed" : "fixed",
+                    position: "fixed",
                     left: isFullscreen ? 0 : (floatingPos?.x ?? 20),
                     top: isFullscreen ? 0 : (floatingPos?.y ?? 20),
                     width: isFullscreen ? "100vw" : floatingSize.w,
@@ -1250,20 +1277,21 @@ export default function ParticipantsCallPanel({
                     overflow: "hidden",
                     border: isFullscreen ? "none" : "1px solid rgba(124, 58, 237, 0.35)",
                     background: "#0a0a0d",
-                    zIndex: 99999,
+                    zIndex: 999999,
                     boxShadow: isFullscreen ? "none" : "0 24px 64px rgba(0,0,0,0.85), 0 0 24px rgba(124,58,237,0.2)",
                     display: "flex",
                     flexDirection: "column",
                     animation: "pcp-fadeIn 0.25s ease-out",
+                    pointerEvents: "auto",
                   }}>
                     {/* Top Drag & Control Header */}
                     <div
                       onMouseDown={handleDragMouseDown}
                       style={{
-                        height: 32,
+                        height: 36,
                         background: "rgba(18, 18, 26, 0.95)",
                         borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
-                        padding: "0 12px",
+                        padding: "0 14px",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "space-between",
@@ -1272,9 +1300,9 @@ export default function ParticipantsCallPanel({
                         flexShrink: 0,
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {!isFullscreen && <GripHorizontal size={14} color="#94a3b8" />}
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#f8fafc", letterSpacing: "0.01em" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#f8fafc", letterSpacing: "0.01em" }}>
                           CodeTogether Call ({totalInCall} participant{totalInCall !== 1 ? "s" : ""})
                         </span>
                       </div>
@@ -1282,16 +1310,16 @@ export default function ParticipantsCallPanel({
                         <button
                           onClick={() => setIsFloatingMinimized(true)}
                           title="Minimize to floating pill"
-                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 3, borderRadius: 4 }}
+                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 4, borderRadius: 4 }}
                         >
-                          <Minus size={13} />
+                          <Minus size={14} />
                         </button>
                         <button
                           onClick={() => onFullscreenChange(!isFullscreen)}
                           title={isFullscreen ? "Exit fullscreen" : "Fullscreen call view"}
-                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 3, borderRadius: 4 }}
+                          style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", display: "flex", padding: 4, borderRadius: 4 }}
                         >
-                          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                         </button>
                       </div>
                     </div>
@@ -1310,7 +1338,7 @@ export default function ParticipantsCallPanel({
                             />
                           </div>
                           {tiles.length > 1 && (
-                            <div style={{ display: "flex", gap: 4, height: isFullscreen ? 120 : 80, flexShrink: 0 }}>
+                            <div style={{ display: "flex", gap: 4, height: isFullscreen ? 140 : 80, flexShrink: 0 }}>
                               {tiles.slice(1).map((tile) => (
                                 <VideoTile
                                   key={tile.socketId}
@@ -1340,12 +1368,23 @@ export default function ParticipantsCallPanel({
 
                       {/* Floating Call Controls Bar (Google Meet style) */}
                       <div style={{
-                        position: "absolute", bottom: isFullscreen ? 24 : 10, left: "50%", transform: "translateX(-50%)",
-                        zIndex: 100000, background: "rgba(24, 24, 32, 0.94)", border: "1px solid rgba(255, 255, 255, 0.1)",
-                        padding: isFullscreen ? "8px 20px" : "6px 12px", borderRadius: 24,
-                        display: "flex", gap: isFullscreen ? 8 : 6, alignItems: "center",
-                        boxShadow: "0 8px 28px rgba(0,0,0,0.6)", backdropFilter: "blur(12px)",
-                        width: "auto", justifyContent: "center", boxSizing: "border-box",
+                        position: "absolute",
+                        bottom: isFullscreen ? 36 : 14,
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        zIndex: 1000000,
+                        background: "rgba(24, 24, 32, 0.94)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        padding: isFullscreen ? "10px 24px" : "6px 12px",
+                        borderRadius: 30,
+                        display: "flex",
+                        gap: isFullscreen ? 10 : 6,
+                        alignItems: "center",
+                        boxShadow: "0 12px 36px rgba(0,0,0,0.75), 0 0 20px rgba(0,0,0,0.4)",
+                        backdropFilter: "blur(14px)",
+                        width: "auto",
+                        justifyContent: "center",
+                        boxSizing: "border-box",
                         animation: "pcp-slideUp 0.3s",
                       }}>
                         <ControlButton
@@ -1373,7 +1412,7 @@ export default function ParticipantsCallPanel({
                           icon={<ScreenShare size={isFullscreen ? 20 : 15} />}
                         />
 
-                        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
+                        <div style={{ width: 1, height: isFullscreen ? 28 : 24, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
 
                         <ControlButton
                           onClick={() => setIsFloatingMinimized(true)}
@@ -1391,7 +1430,7 @@ export default function ParticipantsCallPanel({
                           icon={isFullscreen ? <Minimize2 size={isFullscreen ? 20 : 15} /> : <Maximize2 size={isFullscreen ? 20 : 15} />}
                         />
 
-                        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />
+                        <div style={{ width: 1, height: isFullscreen ? 28 : 24, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
 
                         <button
                           onClick={leaveCall}
@@ -1399,7 +1438,7 @@ export default function ParticipantsCallPanel({
                           title="Leave call"
                           style={{
                             background: "#ea4335", color: "#fff", border: "none", cursor: "pointer",
-                            padding: isFullscreen ? "8px 20px" : "6px 14px", borderRadius: 18,
+                            padding: isFullscreen ? "10px 22px" : "6px 14px", borderRadius: 20,
                             fontSize: isFullscreen ? 13 : 11, fontWeight: 600,
                             display: "flex", alignItems: "center", gap: 6,
                           }}
@@ -1425,7 +1464,8 @@ export default function ParticipantsCallPanel({
                       </div>
                     )}
                   </div>
-                )
+                ),
+                document.body
               )}
             </div>
           )}
@@ -1677,7 +1717,7 @@ function ControlButton({ onClick, active, danger, accent, label, showLabel, icon
     fgColor = "#c084fc";
   } else if (accent) {
     bgColor = "transparent";
-    fgColor = "#e8eaed";
+    fgColor = "#000000";
   } else if (active) {
     bgColor = "rgba(255,255,255,0.08)";
     fgColor = "#e8eaed";

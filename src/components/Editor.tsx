@@ -227,75 +227,75 @@ export default function Editor(props: EditorProps) {
   };
 
   return (
-    <div style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", position: "relative", background: "#1e1e1e" }}>
+    <div className="relative flex h-full flex-1 flex-col bg-[#1e1e1e]">
       {/* Breadcrumb */}
-      <div style={{ height: 22, background: "#1e1e1e", display: "flex", alignItems: "center", padding: "0 16px", fontSize: 11, color: "#858585", gap: 4 }}>
+      <div className="flex h-[22px] items-center gap-1 bg-[#1e1e1e] px-4 text-[11px] text-[#858585]">
         <span>src</span>
         <ChevronRight size={10} />
-        <span style={{ color: "#cccccc" }}>{props.activeFileName}</span>
+        <span className="text-[#cccccc]">{props.activeFileName}</span>
       </div>
 
-      <div style={{ flex: 1, display: "flex", position: "relative", overflow: "hidden" }}>
+      <div className="relative flex flex-1 overflow-hidden">
         {isImage ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#111", overflow: "hidden" }}>
-            <div style={{ height: 36, background: "#1a1a1a", borderBottom: "1px solid #282828", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>🖼️ Image Preview · {props.activeFileName}</span>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button onClick={() => setImageZoom(z => Math.max(0.2, z - 0.2))} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#fff", borderRadius: 4, cursor: "pointer" }}>-</button>
-                <span style={{ fontSize: 11, color: "#ffffff", fontWeight: 700 }}>{Math.round(imageZoom * 100)}%</span>
-                <button onClick={() => setImageZoom(z => Math.min(4, z + 0.2))} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#fff", borderRadius: 4, cursor: "pointer" }}>+</button>
-                <button onClick={() => setImageZoom(1)} style={{ padding: "3px 8px", background: "#2a2a2a", border: "1px solid #333", color: "#888", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>Reset</button>
-                <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download</button>
+          <div className="flex flex-1 flex-col overflow-hidden bg-[#111]">
+            <div className="flex h-9 items-center justify-between border-b border-[#282828] bg-[#1a1a1a] px-4">
+              <span className="text-xs font-bold text-white">🖼️ Image Preview · {props.activeFileName}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setImageZoom(z => Math.max(0.2, z - 0.2))} className="cursor-pointer rounded border border-[#333] bg-[#2a2a2a] px-2 py-[3px] text-white">-</button>
+                <span className="text-[11px] font-bold text-white">{Math.round(imageZoom * 100)}%</span>
+                <button onClick={() => setImageZoom(z => Math.min(4, z + 0.2))} className="cursor-pointer rounded border border-[#333] bg-[#2a2a2a] px-2 py-[3px] text-white">+</button>
+                <button onClick={() => setImageZoom(1)} className="cursor-pointer rounded border border-[#333] bg-[#2a2a2a] px-2 py-[3px] text-[11px] text-[#888]">Reset</button>
+                <button onClick={handleDownloadFile} className="cursor-pointer rounded border-none bg-white px-2.5 py-[3px] text-[11px] font-bold text-black">Download</button>
               </div>
             </div>
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto", padding: 20, backgroundImage: "radial-gradient(#222 1px, transparent 0)", backgroundSize: "16px 16px" }}>
-              <img src={codeContent} alt={props.activeFileName} style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center", transition: "transform 0.15s ease-out", maxWidth: "90%", maxHeight: "90%", borderRadius: 6, boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }} />
+            <div className="flex flex-1 items-center justify-center overflow-auto bg-[radial-gradient(#222_1px,transparent_0)] bg-[length:16px_16px] p-5">
+              <img src={codeContent} alt={props.activeFileName} className="max-h-[90%] max-w-[90%] rounded-md shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-transform duration-150 ease-out" style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center" }} />
             </div>
           </div>
         ) : isPdf ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#151515", overflow: "hidden" }}>
-            <div style={{ height: 36, background: "#1a1a1a", borderBottom: "1px solid #282828", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>📕 PDF Document Viewer · {props.activeFileName}</span>
-              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download PDF</button>
+          <div className="flex flex-1 flex-col overflow-hidden bg-[#151515]">
+            <div className="flex h-9 items-center justify-between border-b border-[#282828] bg-[#1a1a1a] px-4">
+              <span className="text-xs font-bold text-white">📕 PDF Document Viewer · {props.activeFileName}</span>
+              <button onClick={handleDownloadFile} className="cursor-pointer rounded border-none bg-white px-2.5 py-[3px] text-[11px] font-bold text-black">Download PDF</button>
             </div>
-            <div style={{ flex: 1, position: "relative" }}>
-              <object data={codeContent} type="application/pdf" style={{ width: "100%", height: "100%", border: "none" }}>
-                <iframe src={codeContent} style={{ width: "100%", height: "100%", border: "none" }} title="PDF Preview">
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#aaa", gap: 12 }}>
+            <div className="relative flex-1">
+              <object data={codeContent} type="application/pdf" className="h-full w-full border-none">
+                <iframe src={codeContent} className="h-full w-full border-none" title="PDF Preview">
+                  <div className="flex h-full flex-col items-center justify-center gap-3 text-[#aaa]">
                     <p>PDF Preview available for download.</p>
-                    <button onClick={handleDownloadFile} style={{ padding: "8px 16px", background: "#ffffff", color: "#000", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>Download PDF Document</button>
+                    <button onClick={handleDownloadFile} className="cursor-pointer rounded-md border-none bg-white px-4 py-2 font-bold text-black">Download PDF Document</button>
                   </div>
                 </iframe>
               </object>
             </div>
           </div>
         ) : isDoc ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#121216", padding: 30 }}>
-            <div style={{ background: "#1a1a24", border: "1px solid #2a2a3c", borderRadius: 12, padding: 32, maxWidth: 440, width: "100%", textAlign: "center", boxShadow: "0 12px 40px rgba(0,0,0,0.4)" }}>
-              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>
+          <div className="flex flex-1 flex-col items-center justify-center bg-[#121216] p-[30px]">
+            <div className="w-full max-w-[440px] rounded-xl border border-[#2a2a3c] bg-[#1a1a24] p-8 text-center shadow-[0_12px_40px_rgba(0,0,0,0.4)]">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-white/20 bg-white/10 text-[28px]">
                 📄
               </div>
-              <h3 style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 8, wordBreak: "break-all" }}>{props.activeFileName.split("/").pop()}</h3>
-              <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>Word Document (.doc/.docx)</p>
-              <button onClick={handleDownloadFile} style={{ width: "100%", padding: "10px 16px", background: "#ffffff", color: "#000", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "background 0.2s" }}>
+              <h3 className="mb-2 break-all text-lg font-extrabold text-white">{props.activeFileName.split("/").pop()}</h3>
+              <p className="mb-5 text-[13px] text-[#888]">Word Document (.doc/.docx)</p>
+              <button onClick={handleDownloadFile} className="w-full cursor-pointer rounded-lg border-none bg-white px-4 py-2.5 text-[13px] font-bold text-black transition-colors hover:bg-gray-200">
                 Download & Open Document
               </button>
             </div>
           </div>
         ) : isAudio || isVideo ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#0a0a0f", overflow: "hidden" }}>
-            <div style={{ height: 36, background: "#14141c", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px" }}>
-              <span style={{ fontSize: 12, color: "#ffffff", fontWeight: 700 }}>{isVideo ? "🎬 Video Player" : "🎵 Audio Player"} · {props.activeFileName}</span>
-              <button onClick={handleDownloadFile} style={{ padding: "3px 10px", background: "#ffffff", border: "none", color: "#000", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Download Media</button>
+          <div className="flex flex-1 flex-col overflow-hidden bg-[#0a0a0f]">
+            <div className="flex h-9 items-center justify-between border-b border-[#222] bg-[#14141c] px-4">
+              <span className="text-xs font-bold text-white">{isVideo ? "🎬 Video Player" : "🎵 Audio Player"} · {props.activeFileName}</span>
+              <button onClick={handleDownloadFile} className="cursor-pointer rounded border-none bg-white px-2.5 py-[3px] text-[11px] font-bold text-black">Download Media</button>
             </div>
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div className="flex flex-1 items-center justify-center p-5">
               {isVideo ? (
-                <video src={codeContent} controls autoPlay style={{ maxWidth: "90%", maxHeight: "90%", borderRadius: 8, boxShadow: "0 10px 35px rgba(0,0,0,0.6)" }} />
+                <video src={codeContent} controls autoPlay className="max-h-[90%] max-w-[90%] rounded-lg shadow-[0_10px_35px_rgba(0,0,0,0.6)]" />
               ) : (
-                <div style={{ background: "#161622", border: "1px solid #2a2a3a", borderRadius: 16, padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 16, minWidth: 320 }}>
-                  <div style={{ width: 60, height: 60, borderRadius: "50%", background: "#a855f720", border: "1px solid #a855f740", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>🎵</div>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{props.activeFileName.split("/").pop()}</span>
-                  <audio src={codeContent} controls autoPlay style={{ width: "100%" }} />
+                <div className="flex min-w-80 flex-col items-center gap-4 rounded-2xl border border-white/25 bg-[#161622] p-8">
+                  <div className="flex h-[60px] w-[60px] items-center justify-center rounded-full border border-white/25 bg-white/10 text-2xl">🎵</div>
+                  <span className="text-sm font-bold text-white">{props.activeFileName.split("/").pop()}</span>
+                  <audio src={codeContent} controls autoPlay className="w-full" />
                 </div>
               )}
             </div>
@@ -344,38 +344,32 @@ export default function Editor(props: EditorProps) {
         {/* Find & Replace overlay */}
         {isFindOpen && !isMedia && (
           <div
-            className="fade-in"
-            style={{
-              position: "absolute", top: 10, right: 30, background: "#252526",
-              border: "1px solid #454545", padding: 8, zIndex: 100, borderRadius: 2,
-              display: "flex", flexDirection: "column", gap: 6, width: 260,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-            }}
+            className="fade-in absolute right-[30px] top-2.5 z-[100] flex w-[260px] flex-col gap-1.5 rounded-[2px] border border-[#454545] bg-[#252526] p-2 shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <div style={{ flex: 1, display: "flex", alignItems: "center", background: "#3c3c3c", padding: "2px 4px" }}>
+            <div className="flex items-center gap-1">
+              <div className="flex flex-1 items-center bg-[#3c3c3c] px-1 py-0.5">
                 <Search size={14} color="#858585" />
                 <input
                   autoFocus value={findText}
                   onChange={(e) => setFindText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleFind()}
                   placeholder="Find"
-                  style={{ flex: 1, background: "transparent", border: "none", color: "#fff", fontSize: 12, outline: "none", marginLeft: 4 }}
+                  className="ml-1 flex-1 border-none bg-transparent text-xs text-white outline-none"
                 />
               </div>
-              <X size={14} color="#858585" style={{ cursor: "pointer" }} onClick={() => setIsFindOpen(false)} />
+              <X size={14} color="#858585" className="cursor-pointer" onClick={() => setIsFindOpen(false)} />
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <div style={{ flex: 1, display: "flex", alignItems: "center", background: "#3c3c3c", padding: "2px 4px" }}>
+            <div className="flex items-center gap-1">
+              <div className="flex flex-1 items-center bg-[#3c3c3c] px-1 py-0.5">
                 <Replace size={14} color="#858585" />
                 <input
                   value={replaceText}
                   onChange={(e) => setReplaceText(e.target.value)}
                   placeholder="Replace"
-                  style={{ flex: 1, background: "transparent", border: "none", color: "#fff", fontSize: 12, outline: "none", marginLeft: 4 }}
+                  className="ml-1 flex-1 border-none bg-transparent text-xs text-white outline-none"
                 />
               </div>
-              <button onClick={handleReplace} style={{ background: "#444", border: "none", color: "#fff", fontSize: 10, padding: "2px 6px", cursor: "pointer" }}>
+              <button onClick={handleReplace} className="cursor-pointer border-none bg-[#444] px-1.5 py-0.5 text-[10px] text-white">
                 Replace
               </button>
             </div>
@@ -387,9 +381,9 @@ export default function Editor(props: EditorProps) {
         .minimap-overlay { position: absolute; top: 0; right: 0; width: 60px; height: 100%; background: rgba(255,255,255,0.02); pointer-events: none; }
       `}</style>
       <style jsx global>{`
-        .remote-cursor-line { border-left: 2px solid #22d3ee; }
+        .remote-cursor-line { border-left: 2px solid #ffffff; }
         .remote-cursor-label {
-          background: #0e7490; border-radius: 3px; color: #fff;
+          background: #ffffff; border-radius: 3px; color: #000;
           font-size: 11px; font-weight: 700; margin-left: 6px;
           padding: 1px 5px; pointer-events: none;
         }

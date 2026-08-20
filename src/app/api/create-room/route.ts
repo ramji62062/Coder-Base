@@ -28,14 +28,9 @@ export async function POST(request: Request) {
       authorName?: string;
     };
 
-    let creatorId = body.createdBy;
     const { user } = await getAuthenticatedUser(request);
-    if (user) {
-      creatorId = user.id;
-    }
-
-    if (!creatorId) {
-      return NextResponse.json({ error: "createdBy or valid user session is required" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "A valid user session is required" }, { status: 401 });
     }
 
     const selectedLanguage = (body.language || "javascript").toLowerCase();
@@ -61,7 +56,7 @@ export async function POST(request: Request) {
       .insert({
         name: finalRoomName,
         room_code: roomCode,
-        created_by: creatorId,
+        created_by: user.id,
         language: selectedLanguage,
         files_json: body.files || null,
         code_content: body.files ? null : starterCode,

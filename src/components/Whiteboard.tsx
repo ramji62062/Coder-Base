@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Square, Circle, Minus, Type, Eraser, Trash2, Download, Undo2, Redo2, MousePointer2, ArrowUpRight, AlignLeft, Hand, Sparkles, Box, RotateCcw } from "lucide-react";
+import { Pencil, Square, Circle, Minus, Type, Eraser, Trash2, Download, Undo2, Redo2, MousePointer2, ArrowUpRight, Hand, Sparkles, Box, RotateCcw, Image as ImageIcon, Upload, Copy, Trash2 as TrashIcon, Minimize2, Maximize2, RotateCcw as RotateIcon, ZoomIn, ZoomOut } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
-type ToolType = "select" | "pen" | "eraser" | "line" | "arrow" | "rect" | "circle" | "text" | "pan";
+type ToolType = "select" | "pen" | "eraser" | "line" | "arrow" | "rect" | "circle" | "text" | "pan" | "image";
 
 interface Point { x: number; y: number; }
 interface WbElement {
@@ -12,6 +12,7 @@ interface WbElement {
   points?: Point[]; x?: number; y?: number; w?: number; h?: number;
   color: string; lineWidth: number;
   text?: string; fontSize?: number; fontFamily?: string;
+  src?: string; alt?: string; rotation?: number;
 }
 
 interface WhiteboardProps { roomId: string; currentUserId: string; }
@@ -32,6 +33,7 @@ const COLORS = [
 ];
 const WIDTHS = [2, 4, 8, 14];
 const FONTS = ["Inter", "JetBrains Mono", "Georgia", "Arial", "Brush Script MT"];
+const imageCache = new Map<string, HTMLImageElement>();
 
 function arrowhead(ctx: CanvasRenderingContext2D, from: Point, to: Point, size = 12) {
   const angle = Math.atan2(to.y - from.y, to.x - from.x);
@@ -63,24 +65,17 @@ function drawEl(ctx: CanvasRenderingContext2D, el: WbElement, selected = false, 
   } else if (el.type === "rect" && el.x !== undefined && el.y !== undefined && el.w !== undefined && el.h !== undefined) {
     if (is3D && el.text) {
       const d = depth;
-      ctx.fillStyle = el.color;
-      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = el.color; ctx.globalAlpha = 0.4;
       ctx.fillRect(el.x + d, el.y + d, el.w, el.h);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#000000";
+      ctx.globalAlpha = 1; ctx.fillStyle = "#000000";
       ctx.fillRect(el.x + d, el.y + d, el.w, el.h);
-      ctx.fillStyle = el.color;
-      ctx.strokeRect(el.x + d, el.y + d, el.w, el.h);
+      ctx.fillStyle = el.color; ctx.strokeRect(el.x + d, el.y + d, el.w, el.h);
 
       ctx.beginPath();
-      ctx.moveTo(el.x, el.y);
-      ctx.lineTo(el.x + d, el.y + d);
-      ctx.moveTo(el.x + el.w, el.y);
-      ctx.lineTo(el.x + el.w + d, el.y + d);
-      ctx.moveTo(el.x, el.y + el.h);
-      ctx.lineTo(el.x + d, el.y + el.h + d);
-      ctx.moveTo(el.x + el.w, el.y + el.h);
-      ctx.lineTo(el.x + el.w + d, el.y + el.h + d);
+      ctx.moveTo(el.x, el.y); ctx.lineTo(el.x + d, el.y + d);
+      ctx.moveTo(el.x + el.w, el.y); ctx.lineTo(el.x + el.w + d, el.y + d);
+      ctx.moveTo(el.x, el.y + el.h); ctx.lineTo(el.x + d, el.y + el.h + d);
+      ctx.moveTo(el.x + el.w, el.y + el.h); ctx.lineTo(el.x + el.w + d, el.y + el.h + d);
       ctx.stroke();
 
       ctx.fillStyle = "#000000";
@@ -114,6 +109,29 @@ function drawEl(ctx: CanvasRenderingContext2D, el: WbElement, selected = false, 
       ctx.textBaseline = "middle";
       ctx.fillText(el.text, el.x + el.w! / 2, el.y! + el.h! / 2);
     }
+  } else if (el.type === "image" && el.src) {
+    let img = imageCache.get(el.src);
+    if (!img) {
+      img = new window.Image();
+      img.onload = () => window.dispatchEvent(new CustomEvent("codetogether:whiteboard-image-loaded"));
+      img.src = el.src;
+      imageCache.set(el.src, img);
+    }
+    if (img.complete) {
+      ctx.save();
+      ctx.translate(el.x! + el.w! / 2, el.y! + el.h! / 2);
+      ctx.rotate((el.rotation || 0) * Math.PI / 180);
+      ctx.drawImage(img, -el.w! / 2, -el.h! / 2, el.w!, el.h!);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#333";
+      ctx.fillRect(el.x!, el.y!, el.w!, el.h!);
+    }
+    if (selected) {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+      ctx.strokeRect(el.x!, el.y!, el.w!, el.h!);
+      ctx.setLineDash([]);
+    }
   } else if (el.type === "text" && el.text) {
     ctx.font = `${el.fontSize || 18}px "${el.fontFamily || "Inter"}", sans-serif`;
     ctx.textBaseline = "top";
@@ -123,7 +141,7 @@ function drawEl(ctx: CanvasRenderingContext2D, el: WbElement, selected = false, 
     lines.forEach((line, i) => ctx.fillText(line, el.x!, el.y! + i * lineH));
   }
 
-  if (selected) {
+  if (selected && el.type !== "image") {
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
     const bounds = getElBounds(el);
@@ -178,13 +196,10 @@ function toWbElement(raw: Record<string, unknown>, index: number): WbElement {
   const color = typeof raw.color === "string" ? raw.color : "#ffffff";
   const lineWidth = typeof raw.lineWidth === "number" ? raw.lineWidth : 3;
   const text = typeof raw.text === "string" ? raw.text : "";
+  const src = typeof raw.src === "string" ? raw.src : undefined;
   
   if (type === "text") {
-    return {
-      id, type: "text", x: Number(raw.x) || 80, y: Number(raw.y) || 80,
-      text: text || "Text", color, lineWidth: 1,
-      fontSize: typeof raw.fontSize === "number" ? raw.fontSize : 18,
-    };
+    return { id, type: "text", x: Number(raw.x) || 80, y: Number(raw.y) || 80, text: text || "Text", color, lineWidth: 1, fontSize: typeof raw.fontSize === "number" ? raw.fontSize : 18 };
   }
   if (type === "line" || type === "arrow") {
     const points = Array.isArray(raw.points) ? raw.points as Point[] : [
@@ -193,26 +208,34 @@ function toWbElement(raw: Record<string, unknown>, index: number): WbElement {
     ];
     return { id, type, points, color, lineWidth };
   }
+  if (type === "image") {
+    return {
+      id, type: "image", x: Number(raw.x) || 80, y: Number(raw.y) || 80,
+      w: Number(raw.w) || 300, h: Number(raw.h) || 200,
+      color, lineWidth, src, alt: typeof raw.alt === "string" ? raw.alt : "Image",
+      rotation: typeof raw.rotation === "number" ? raw.rotation : 0
+    };
+  }
   return {
-    id,
-    type: type === "circle" ? "circle" : "rect",
-    x: Number(raw.x) || 80,
-    y: Number(raw.y) || 80,
-    w: Number(raw.w) || 160,
-    h: Number(raw.h) || 80,
-    color, lineWidth,
-    text,
+    id, type: type === "circle" ? "circle" : "rect",
+    x: Number(raw.x) || 80, y: Number(raw.y) || 80,
+    w: Number(raw.w) || 160, h: Number(raw.h) || 80,
+    color, lineWidth, text,
   };
 }
 
+const canvasRef = { current: null as HTMLCanvasElement | null };
+const overlayRef = { current: null as HTMLCanvasElement | null };
+
 export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [elements, setElements] = useState<WbElement[]>([]);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [history, setHistory] = useState<WbElement[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const [redoStack, setRedoStack] = useState<WbElement[][]>([]);
   const [tool, setTool] = useState<ToolType>("pen");
   const [color, setColor] = useState("#ffffff");
@@ -235,6 +258,8 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
   const [is3DMode, setIs3DMode] = useState(false);
   const [cameraAngle, setCameraAngle] = useState({ rotateX: 60, rotateZ: -45 });
   const [depth3D, setDepth3D] = useState(40);
+  const [selectedImage, setSelectedImage] = useState<WbElement | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   const drawing = useRef(false);
   const startPt = useRef<Point>({ x: 0, y: 0 });
@@ -243,8 +268,40 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
   const dragOffset = useRef<Point>({ x: 0, y: 0 });
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const elementsRef = useRef(elements);
+  const isSavingHistory = useRef(false);
 
   useEffect(() => { elementsRef.current = elements; }, [elements]);
+
+  const pushHistory = useCallback((newEls: WbElement[]) => {
+    if (isSavingHistory.current) return;
+    isSavingHistory.current = true;
+    setHistory((prev) => {
+      const next = prev.slice(0, historyIndex + 1);
+      next.push(newEls);
+      return next.slice(-100);
+    });
+    setHistoryIndex((prev) => Math.min(prev + 1, 99));
+    setRedoStack([]);
+    setTimeout(() => { isSavingHistory.current = false; }, 0);
+  }, [historyIndex]);
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setElements(history[newIndex]);
+      broadcastEls(history[newIndex]);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setElements(history[newIndex]);
+      broadcastEls(history[newIndex]);
+    }
+  };
 
   useEffect(() => {
     if (!roomId) return;
@@ -254,14 +311,19 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     channel
       .on("broadcast", { event: "wb-update" }, ({ payload }: { payload: { elements: WbElement[] } }) => {
         setElements(payload.elements);
+        pushHistory(payload.elements);
       })
       .on("broadcast", { event: "wb-add-elements" }, ({ payload }: { payload: { elements: WbElement[] } }) => {
-        setElements((prev) => [...prev, ...payload.elements]);
+        setElements((prev) => {
+          const next = [...prev, ...payload.elements];
+          pushHistory(next);
+          return next;
+        });
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [roomId]);
+  }, [roomId, pushHistory]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -274,25 +336,18 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
         if (channelRef.current) {
           channelRef.current.send({ type: "broadcast", event: "wb-add-elements", payload: { elements: incoming } });
         }
+        pushHistory(next);
         return next;
       });
     };
     window.addEventListener("codetogether:wb-add", handler);
     return () => window.removeEventListener("codetogether:wb-add", handler);
-  }, [roomId]);
+  }, [roomId, pushHistory]);
 
   const broadcastEls = (newEls: WbElement[]) => {
     if (channelRef.current) {
-      channelRef.current.send({
-        type: "broadcast", event: "wb-update", payload: { elements: newEls }
-      });
+      channelRef.current.send({ type: "broadcast", event: "wb-update", payload: { elements: newEls } });
     }
-  };
-
-  const pushState = (newEls: WbElement[]) => {
-    setElements(newEls);
-    setRedoStack([]);
-    broadcastEls(newEls);
   };
 
   const redrawAll = useCallback(() => {
@@ -330,20 +385,22 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     const size = computeCanvasSize(elements, viewportW, viewportH);
     setCanvasSize(size);
     const c = canvasRef.current, o = overlayRef.current;
-    if (c && o) {
-      c.width = size.width; c.height = size.height;
-      o.width = size.width; o.height = size.height;
-    }
+    if (c && o) { c.width = size.width; c.height = size.height; o.width = size.width; o.height = size.height; }
   }, [elements]);
 
   useEffect(() => { redrawAll(); }, [redrawAll]);
 
+  useEffect(() => {
+    const handleImageLoaded = () => redrawAll();
+    window.addEventListener("codetogether:whiteboard-image-loaded", handleImageLoaded);
+    return () => window.removeEventListener("codetogether:whiteboard-image-loaded", handleImageLoaded);
+  }, [redrawAll]);
+
   const getPos = (e: React.MouseEvent<HTMLCanvasElement>): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    const scroll = scrollRef.current;
     return {
-      x: e.clientX - rect.left + (scroll?.scrollLeft || 0) - panOffset.x,
-      y: e.clientY - rect.top + (scroll?.scrollTop || 0) - panOffset.y,
+      x: (e.clientX - rect.left) / zoom,
+      y: (e.clientY - rect.top) / zoom,
     };
   };
 
@@ -363,11 +420,14 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
       const hit = [...elements].reverse().find(el => hitTest(el, pt.x, pt.y));
       if (hit) {
         setSelectedId(hit.id);
+        if (hit.type === "image") setSelectedImage(hit);
+        else setSelectedImage(null);
         draggingId.current = hit.id;
         const b = getElBounds(hit);
         dragOffset.current = { x: pt.x - (b?.x || 0), y: pt.y - (b?.y || 0) };
       } else {
         setSelectedId(null);
+        setSelectedImage(null);
       }
       return;
     }
@@ -385,10 +445,7 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (tool === "pan" && isPanning) {
-      setPanOffset({
-        x: e.clientX - panStart.current.x,
-        y: e.clientY - panStart.current.y,
-      });
+      setPanOffset({ x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y });
       return;
     }
 
@@ -397,19 +454,27 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
 
     if (tool === "select" && draggingId.current) {
       const targetId = draggingId.current;
-      const updated = elements.map(el => {
+      const currentEls = elementsRef.current;
+      const updated = currentEls.map(el => {
         if (el.id !== targetId) return el;
         const b = getElBounds(el);
         if (!b) return el;
         const dx = pt.x - dragOffset.current.x - b.x;
         const dy = pt.y - dragOffset.current.y - b.y;
-
         if (el.points) return { ...el, points: el.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
         if (el.x !== undefined) return { ...el, x: el.x + dx, y: el.y! + dy };
         return el;
       });
       setElements(updated);
-      redrawAll();
+      elementsRef.current = updated;
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          updated.forEach(el => drawEl(ctx, el, el.id === selectedId, is3DMode, depth3D));
+        }
+      }
       return;
     }
 
@@ -447,11 +512,7 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (tool === "pan") {
-      setIsPanning(false);
-      return;
-    }
-
+    if (tool === "pan") { setIsPanning(false); return; }
     if (!drawing.current) return;
     drawing.current = false;
     clearOverlay();
@@ -459,7 +520,7 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     if (tool === "select") {
       if (draggingId.current) {
         draggingId.current = null;
-        broadcastEls(elements);
+        broadcastEls(elementsRef.current);
       }
       return;
     }
@@ -483,424 +544,311 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
       if (w > 4 && h > 4) newEl = { id, type: "circle", x, y, w, h, color, lineWidth };
     }
 
-    if (newEl) {
-      pushState([...elements, newEl]);
-    }
+    if (newEl) pushState([...elements, newEl]);
   };
 
-  const openTextInput = () => {
-    setTextInput({ visible: true, x: 80, y: 80, value: "" });
+  const pushState = (newEls: WbElement[]) => {
+    setElements(newEls);
+    pushHistory(newEls);
+    broadcastEls(newEls);
   };
+
+  const openTextInput = () => { setTextInput({ visible: true, x: 80, y: 80, value: "" }); };
 
   const handleTextSubmit = () => {
     if (!textInput.visible) return;
     const val = textInput.value.trim();
     if (val) {
       const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const newEl: WbElement = {
-        id, type: "text", x: textInput.x, y: textInput.y, text: val, color, lineWidth: 1, fontSize, fontFamily
-      };
+      const newEl: WbElement = { id, type: "text", x: textInput.x, y: textInput.y, text: val, color, lineWidth: 1, fontSize, fontFamily };
       pushState([...elements, newEl]);
     }
     setTextInput({ visible: false, x: 0, y: 0, value: "" });
   };
 
-  const undo = () => {
-    if (elements.length === 0) return;
-    const last = elements[elements.length - 1];
-    setRedoStack(p => [...p, [last]]);
-    const next = elements.slice(0, -1);
-    setElements(next);
-    broadcastEls(next);
+  const clear = () => { if (confirm("Clear the whiteboard for everyone?")) { pushState([]); setSelectedId(null); } };
+  const deleteSelected = () => { if (!selectedId) return; const next = elements.filter(el => el.id !== selectedId); pushState(next); setSelectedId(null); setSelectedImage(null); };
+  const download = () => { const canvas = canvasRef.current; if (!canvas) return; const link = document.createElement("a"); link.download = `whiteboard-${roomId}.png`; link.href = canvas.toDataURL(); link.click(); };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const newEl: WbElement = { id, type: "image", x: 100, y: 100, w: 300, h: 200, color: "#ffffff", lineWidth: 1, src: dataUrl, alt: file.name, rotation: 0 };
+      pushState([...elements, newEl]);
+      setTool("select");
+      setSelectedId(id);
+      setSelectedImage(newEl);
+      e.target.value = "";
+    };
+    reader.readAsDataURL(file);
   };
 
-  const redo = () => {
-    if (redoStack.length === 0) return;
-    const restore = redoStack[redoStack.length - 1];
-    setRedoStack(p => p.slice(0, -1));
-    const next = [...elements, ...restore];
-    setElements(next);
-    broadcastEls(next);
-  };
-
-  const clear = () => {
-    if (confirm("Clear the whiteboard for everyone?")) {
-      pushState([]);
-      setSelectedId(null);
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData.items;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result as string;
+            const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            const newEl: WbElement = { id, type: "image", x: 100, y: 100, w: 300, h: 200, color: "#ffffff", lineWidth: 1, src: dataUrl, alt: "Pasted image", rotation: 0 };
+            pushState([...elements, newEl]);
+            setTool("select");
+            setSelectedId(id);
+            setSelectedImage(newEl);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
     }
   };
 
-  const deleteSelected = () => {
-    if (!selectedId) return;
-    const next = elements.filter(el => el.id !== selectedId);
-    pushState(next);
-    setSelectedId(null);
+  const handleImageAction = (action: string) => {
+    if (!selectedImage) return;
+    const img = selectedImage;
+    switch (action) {
+      case "minimize": {
+        const nextImage = { ...img, w: 80, h: 80 };
+        setSelectedImage(nextImage);
+        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+        break;
+      }
+      case "maximize": {
+        const nextImage = { ...img, w: 600, h: 400 };
+        setSelectedImage(nextImage);
+        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+        break;
+      }
+      case "copy": navigator.clipboard.writeText(`!${img.alt}(${img.src})`); break;
+      case "rotate": {
+        const nextImage = { ...img, rotation: ((img.rotation ?? 0) + 90) % 360 };
+        setSelectedImage(nextImage);
+        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+        break;
+      }
+      case "delete": { const next = elements.filter(el => el.id !== img.id); pushState(next); setSelectedId(null); setSelectedImage(null); break; }
+    }
   };
 
-  const download = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement("a");
-    link.download = `whiteboard-${roomId}.png`;
-    link.href = canvas.toDataURL();
-    link.click();
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const rect = canvasRef.current!.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / zoom - panOffset.x;
+        const y = (e.clientY - rect.top) / zoom - panOffset.y;
+        const newEl: WbElement = { id, type: "image", x, y, w: 300, h: 200, color: "#ffffff", lineWidth: 1, src: dataUrl, alt: file.name, rotation: 0 };
+        pushState([...elements, newEl]);
+        setTool("select");
+        setSelectedId(id);
+        setSelectedImage(newEl);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  const TOOLS: { id: ToolType; icon: React.ReactNode; title: string }[] = [
-    { id: "select", icon: <MousePointer2 size={15}/>, title: "Select & Move" },
-    { id: "pen", icon: <Pencil size={15}/>, title: "Pen" },
-    { id: "eraser", icon: <Eraser size={15}/>, title: "Eraser" },
-    { id: "line", icon: <Minus size={15}/>, title: "Line" },
-    { id: "arrow", icon: <ArrowUpRight size={15}/>, title: "Arrow" },
-    { id: "rect", icon: <Square size={15}/>, title: "Rectangle" },
-    { id: "circle", icon: <Circle size={15}/>, title: "Circle" },
-    { id: "text", icon: <Type size={15}/>, title: "Text (click to place)" },
-    { id: "pan", icon: <Hand size={15}/>, title: "Pan / Drag Canvas" },
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); };
+
+  const TOOLS: { id: ToolType; icon: React.ReactNode; title: string; shortcut?: string }[] = [
+    { id: "select", icon: <MousePointer2 size={16}/>, title: "Select (V)", shortcut: "V" },
+    { id: "pan", icon: <Hand size={16}/>, title: "Pan (H)", shortcut: "H" },
+    { id: "pen", icon: <Pencil size={16}/>, title: "Pen (P)", shortcut: "P" },
+    { id: "eraser", icon: <Eraser size={16}/>, title: "Eraser (E)", shortcut: "E" },
+    { id: "line", icon: <Minus size={16}/>, title: "Line (L)", shortcut: "L" },
+    { id: "arrow", icon: <ArrowUpRight size={16}/>, title: "Arrow (A)", shortcut: "A" },
+    { id: "rect", icon: <Square size={16}/>, title: "Rectangle (R)", shortcut: "R" },
+    { id: "circle", icon: <Circle size={16}/>, title: "Circle (C)", shortcut: "C" },
+    { id: "text", icon: <Type size={16}/>, title: "Text (T)", shortcut: "T" },
+    { id: "image", icon: <ImageIcon size={16}/>, title: "Image (I)", shortcut: "I" },
   ];
 
+  const setZoomLevel = (nextZoom: number) => {
+    setZoom(Math.min(2.5, Math.max(0.35, Number(nextZoom.toFixed(2)))));
+  };
+
   const cursors: Record<ToolType, string> = {
-    select: "default", pen: "crosshair", eraser: "cell",
-    line: "crosshair", arrow: "crosshair", rect: "crosshair", circle: "crosshair", text: "text",
-    pan: isPanning ? "grabbing" : "grab"
+    select: "default", pen: "crosshair", eraser: "cell", line: "crosshair", arrow: "crosshair",
+    rect: "crosshair", circle: "crosshair", text: "text", pan: isPanning ? "grabbing" : "grab",
+    image: "copy"
   };
 
   return (
-    <div className="flex h-full bg-black relative font-inter">
-      {/* Tool Sidebar */}
-      <div className="w-[52px] bg-[#0a0a0a] border-r border-[#222222] flex flex-col items-center py-2.5 gap-[3px] overflow-y-auto shrink-0 z-10">
-        {TOOLS.map(t => (
-          <button key={t.id} onClick={() => { setTool(t.id); if (t.id === "text") openTextInput(); else setTextInput(p => ({ ...p, visible: false })); }} title={t.title}
-            className={`w-[36px] h-[36px] rounded-lg border-none cursor-pointer flex items-center justify-center transition-colors ${
-              tool === t.id ? "bg-white text-black font-bold" : "bg-transparent text-gray-400 hover:bg-white/10 hover:text-white"
-            }`}>
-            {t.icon}
-          </button>
-        ))}
+    <div className="flex h-full bg-black relative font-inter overflow-hidden" onDrop={handleDrop} onDragOver={handleDragOver}>
+      {/* Top Toolbar */}
+      <div className="absolute top-0 left-0 right-0 z-50 bg-ct-dark-black/95 backdrop-blur-sm border-b border-[#222] overflow-x-auto">
+        <div className="min-w-max flex items-center gap-3 px-2 py-2">
+        {/* Left - Tools */}
+        <div className="flex items-center gap-1 md:gap-2 shrink-0">
+          {TOOLS.map(t => (
+            <button key={t.id} onClick={() => { if (t.id === "image") fileInputRef.current?.click(); setTool(t.id); if (t.id === "text") openTextInput(); else setTextInput(p => ({ ...p, visible: false })); }} title={`${t.title}${t.shortcut ? ` (${t.shortcut})` : ""}`}
+              className={`w-9 h-9 md:w-10 md:h-10 rounded-lg border-none cursor-pointer flex items-center justify-center transition-colors shrink-0 ${
+                tool === t.id ? "bg-white text-black font-bold" : "bg-transparent text-gray-400 hover:bg-white/10 hover:text-white"
+              }`}>
+              {t.icon}
+            </button>
+          ))}
+        </div>
 
-        <div className="h-px bg-[#222222] w-8 my-1.5"/>
-
-        <button onClick={() => setShowAiPanel(p => !p)} title="AI Architecture Generator"
-          className={`w-[36px] h-[36px] rounded-lg border-none cursor-pointer flex items-center justify-center transition-colors ${
-            showAiPanel ? "bg-purple-600 text-white" : "bg-transparent text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
-          }`}>
-          <Sparkles size={15}/>
-        </button>
-
-        <button onClick={() => setIs3DMode(p => !p)} title="Toggle 3D Mode"
-          className={`w-[36px] h-[36px] rounded-lg border-none cursor-pointer flex items-center justify-center transition-colors ${
-            is3DMode ? "bg-blue-600 text-white" : "bg-transparent text-blue-400 hover:bg-blue-500/20 hover:text-blue-300"
-          }`}>
-          <Box size={15}/>
-        </button>
-
-        <div className="h-px bg-[#222222] w-8 my-1.5"/>
-
-        {COLORS.map(c => (
-          <button key={c} onClick={() => setColor(c)}
-            className={`rounded-full cursor-pointer transition-all shrink-0 outline-none ${
-              color === c ? "w-[26px] h-[26px] border-2 border-white" : "w-[20px] h-[20px] border border-gray-600"
-            }`}
-            style={{ background: c }}
-            title={c}/>
-        ))}
-
-        <div className="h-px bg-[#222222] w-8 my-1.5"/>
-
-        {WIDTHS.map(w => (
-          <button key={w} onClick={() => setLineWidth(w)} title={`Width ${w}`}
-            className={`w-[34px] h-[28px] rounded-md border-none cursor-pointer flex items-center justify-center ${
-              lineWidth === w ? "bg-white/20" : "bg-transparent"
-            }`}>
-            <div className={`w-5 rounded-full ${lineWidth === w ? "bg-white" : "bg-gray-500"}`} style={{ height: Math.min(w + 1, 10) }}/>
-          </button>
-        ))}
-
-        <div className="h-px bg-[#222222] w-8 my-1.5"/>
-
-        <button onClick={() => setShowFontPanel(p => !p)} title="Text Options"
-          className={`w-[36px] h-[36px] rounded-lg border-none cursor-pointer flex items-center justify-center ${
-            showFontPanel ? "bg-white text-black" : "bg-transparent text-gray-400 hover:text-white"
-          }`}>
-          <AlignLeft size={15}/>
-        </button>
-
-        <div className="h-px bg-[#222222] w-8 my-1.5"/>
-
-        {[
-          { icon: <Undo2 size={14}/>, fn: undo, title: "Undo", disabled: elements.length === 0 },
-          { icon: <Redo2 size={14}/>, fn: redo, title: "Redo", disabled: redoStack.length === 0 },
-          { icon: <Download size={14}/>, fn: download, title: "Download PNG" },
-          { icon: <Trash2 size={14}/>, fn: clear, title: "Clear All", danger: true },
-        ].map(a => (
-          <button key={a.title} onClick={a.fn} title={a.title} disabled={"disabled" in a ? a.disabled : false}
-            className={`w-[36px] h-[36px] rounded-lg border-none bg-transparent flex items-center justify-center ${
-              "disabled" in a && a.disabled ? "text-gray-700 cursor-default" : "danger" in a && a.danger ? "text-red-400 cursor-pointer hover:bg-red-500/20" : "text-gray-400 cursor-pointer hover:text-white"
-            }`}>
-            {a.icon}
-          </button>
-        ))}
-      </div>
-
-      {showFontPanel && (
-        <div className="absolute left-[60px] top-[10px] bg-ct-card border border-[#2a2a2a] rounded-xl p-3.5 z-20 w-[200px] shadow-2xl">
-          <div className="text-[11px] text-gray-400 font-bold mb-2.5 uppercase tracking-wider">Text Options</div>
-          <div className="mb-2.5">
-            <label className="text-[11px] text-gray-400 block mb-1">Font Size: {fontSize}px</label>
-            <input type="range" min={12} max={72} value={fontSize} onChange={e => setFontSize(+e.target.value)}
-              className="w-full accent-white"/>
+        {/* Center - Color, Width, Font */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1 max-w-[340px] overflow-x-auto py-1">
+            {COLORS.map(c => (
+              <button key={c} onClick={() => setColor(c)} className={`w-6 h-6 rounded-full cursor-pointer transition-all shrink-0 outline-none ${
+                color === c ? "border-2 border-white scale-110" : "border border-gray-600 hover:border-white/50"
+              }`} style={{ background: c }} title={c}/>
+            ))}
           </div>
-          <div>
-            <label className="text-[11px] text-gray-400 block mb-1.5">Font Family</label>
-            {FONTS.map(f => (
-              <button key={f} onClick={() => setFontFamily(f)}
-                className={`block w-full text-left p-[5px_8px] rounded-md border-none cursor-pointer text-xs mb-0.5 ${
-                  fontFamily === f ? "bg-white/20 text-white font-bold" : "bg-transparent text-gray-400 hover:text-white"
-                }`} style={{ fontFamily: f }}>
-                {f}
+          <div className="w-px h-6 bg-[#333] mx-1"/>
+          <div className="flex items-center gap-1">
+            {WIDTHS.map(w => (
+              <button key={w} onClick={() => setLineWidth(w)} className={`w-8 h-8 rounded-md cursor-pointer flex items-center justify-center ${ lineWidth === w ? "bg-white/20" : "bg-transparent" }`}>
+                <div className={`w-4 rounded-full ${lineWidth === w ? "bg-white" : "bg-gray-500"}`} style={{ height: Math.min(w + 1, 10) }}/>
               </button>
             ))}
           </div>
+          <div className="w-px h-6 bg-[#333] mx-1"/>
+          <select value={fontFamily} onChange={(e) => setFontFamily(e.target.value)} className="bg-[#1a1a2e] border border-[#333] text-white text-xs px-2 py-1 rounded">
+            {FONTS.map(f => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+          </select>
+          <input type="range" min={12} max={72} value={fontSize} onChange={e => setFontSize(+e.target.value)} className="w-32 accent-white" title="Font Size"/>
+          <span className="text-xs text-gray-400">{fontSize}px</span>
         </div>
-      )}
 
-      {/* 3D Controls Panel */}
-      {is3DMode && (
-        <div className="absolute left-[60px] top-[120px] bg-ct-card border border-blue-500/30 rounded-xl p-3.5 z-20 w-[220px] shadow-2xl">
-          <div className="text-[11px] text-blue-400 font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5">
-            <Box size={12}/> 3D Mode Controls
+        {/* Right - Actions */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 rounded-lg border border-[#333] bg-black/40 px-1">
+            <button onClick={() => setZoomLevel(zoom - 0.1)} title="Zoom out" className="p-2 rounded-md bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer"><ZoomOut size={16}/></button>
+            <span className="w-12 text-center text-xs text-gray-300">{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoomLevel(zoom + 0.1)} title="Zoom in" className="p-2 rounded-md bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer"><ZoomIn size={16}/></button>
           </div>
-          <div className="space-y-3">
-            <div>
-              <label className="text-[10px] text-gray-400 block mb-1">Depth: {depth3D}px</label>
-              <input
-                type="range"
-                min={10}
-                max={80}
-                value={depth3D}
-                onChange={(e) => setDepth3D(+e.target.value)}
-                className="w-full accent-blue-500"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-400 block mb-1">Rotation: {cameraAngle.rotateZ}°</label>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                value={cameraAngle.rotateZ}
-                onChange={(e) => setCameraAngle(p => ({ ...p, rotateZ: +e.target.value }))}
-                className="w-full accent-blue-500"
-              />
-            </div>
-            <button
-              onClick={() => setCameraAngle({ rotateX: 60, rotateZ: -45 })}
-              className="w-full py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-300 text-[10px] rounded-lg border border-[#333333] cursor-pointer flex items-center justify-center gap-1"
-            >
-              <RotateCcw size={10}/> Reset View
-            </button>
-          </div>
-          <p className="text-[9px] text-gray-500 mt-3 leading-relaxed">
-            3D boxes show depth effect. Use AI to generate 3D architecture.
-          </p>
+          <button onClick={undo} disabled={historyIndex === 0} title="Undo (Ctrl+Z)" className="p-2 rounded-lg bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer disabled:opacity-30"><Undo2 size={16}/></button>
+          <button onClick={redo} disabled={historyIndex >= history.length - 1} title="Redo (Ctrl+Y)" className="p-2 rounded-lg bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer disabled:opacity-30"><Redo2 size={16}/></button>
+          <div className="w-px h-6 bg-[#333] mx-1"/>
+          <button onClick={download} title="Download PNG" className="p-2 rounded-lg bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer"><Download size={16}/></button>
+          <button onClick={clear} title="Clear All" className="p-2 rounded-lg bg-transparent text-red-400 hover:bg-red-500/20 cursor-pointer"><Trash2 size={16}/></button>
+          <div className="w-px h-6 bg-[#333] mx-1"/>
+          <button onClick={() => setShowAiPanel(p => !p)} title="AI Architecture" className={`p-2 rounded-lg ${showAiPanel ? "bg-purple-600 text-white" : "bg-transparent text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"} cursor-pointer`}><Sparkles size={16}/></button>
+          <button onClick={() => setIs3DMode(p => !p)} title="3D Mode" className={`p-2 rounded-lg ${is3DMode ? "bg-blue-600 text-white" : "bg-transparent text-blue-400 hover:bg-blue-500/20 hover:text-blue-300"} cursor-pointer`}><Box size={16}/></button>
+          <button onClick={() => fileInputRef.current?.click()} title="Upload Image" className="p-2 rounded-lg bg-transparent text-gray-400 hover:text-white hover:bg-white/10 cursor-pointer"><Upload size={16}/></button>
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden"/>
         </div>
-      )}
-
-      {/* AI Architecture Panel */}
-      {showAiPanel && (
-        <div className="absolute left-[60px] top-[10px] bg-ct-card border border-purple-500/30 rounded-xl p-3.5 z-20 w-[320px] shadow-2xl">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[11px] text-purple-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles size={12}/> AI Architecture Generator
-            </div>
-            <button onClick={() => setShowAiPanel(false)} className="text-gray-500 hover:text-white text-xs">✕</button>
-          </div>
-          <p className="text-[10px] text-gray-400 mb-3 leading-relaxed">
-            Describe what you want to draw and AI will generate it on the whiteboard.
-          </p>
-          <div className="mb-3">
-            <textarea
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="Describe the architecture you want to create...&#10;&#10;Examples:&#10;- Draw a 3D client-server architecture&#10;- Create a microservices diagram&#10;- Draw a database schema&#10;- Create a network topology"
-              className="w-full h-[120px] bg-[#1a1a2e] border border-[#333] rounded-lg p-2.5 text-white text-xs resize-none outline-none focus:border-purple-500/50 placeholder-gray-500"
-              style={{ fontFamily: '"Inter", sans-serif' }}
-            />
-          </div>
-          <div className="space-y-2">
-            <button
-              onClick={async () => {
-                if (!aiPrompt.trim()) return;
-                setAiGenerating(true);
-                setAiStatus("idle");
-                try {
-                  const response = await fetch("/api/ai-whiteboard", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      prompt: aiPrompt,
-                      roomId,
-                      type: "3d"
-                    })
-                  });
-                  const data = await response.json();
-                  if (data.elements && data.elements.length > 0) {
-                    const newElements = data.elements.map((el: Record<string, unknown>, i: number) => toWbElement(el, i));
-                    pushState([...elements, ...newElements]);
-                    setAiStatus("success");
-                    setTimeout(() => setAiStatus("idle"), 3000);
-                  } else {
-                    setAiStatus("error");
-                    setTimeout(() => setAiStatus("idle"), 3000);
-                  }
-                } catch (err) {
-                  console.error("AI generation failed:", err);
-                  setAiStatus("error");
-                  setTimeout(() => setAiStatus("idle"), 3000);
-                }
-                setAiGenerating(false);
-              }}
-              disabled={aiGenerating || !aiPrompt.trim()}
-              className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:opacity-50 text-white text-xs font-bold rounded-lg border-none cursor-pointer transition-colors"
-            >
-              {aiGenerating ? "Generating..." : "Generate 3D Architecture"}
-            </button>
-            <button
-              onClick={async () => {
-                if (!aiPrompt.trim()) return;
-                setAiGenerating(true);
-                setAiStatus("idle");
-                try {
-                  const response = await fetch("/api/ai-whiteboard", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      prompt: aiPrompt,
-                      roomId,
-                      type: "flowchart"
-                    })
-                  });
-                  const data = await response.json();
-                  if (data.elements && data.elements.length > 0) {
-                    const newElements = data.elements.map((el: Record<string, unknown>, i: number) => toWbElement(el, i));
-                    pushState([...elements, ...newElements]);
-                    setAiStatus("success");
-                    setTimeout(() => setAiStatus("idle"), 3000);
-                  } else {
-                    setAiStatus("error");
-                    setTimeout(() => setAiStatus("idle"), 3000);
-                  }
-                } catch (err) {
-                  console.error("AI generation failed:", err);
-                  setAiStatus("error");
-                  setTimeout(() => setAiStatus("idle"), 3000);
-                }
-                setAiGenerating(false);
-              }}
-              disabled={aiGenerating || !aiPrompt.trim()}
-              className="w-full py-2 bg-[#222222] hover:bg-[#333333] disabled:opacity-50 text-gray-300 text-xs font-bold rounded-lg border border-[#333333] cursor-pointer transition-colors"
-            >
-              {aiGenerating ? "Generating..." : "Generate Flow Diagram"}
-            </button>
-            {aiStatus === "success" && (
-              <p className="text-[10px] text-green-400 mt-2 text-center">✓ Diagram generated successfully!</p>
-            )}
-            {aiStatus === "error" && (
-              <p className="text-[10px] text-red-400 mt-2 text-center">✗ Failed to generate. Try again.</p>
-            )}
-          </div>
-          <div className="mt-3 pt-3 border-t border-[#333]">
-            <p className="text-[9px] text-gray-500 mb-2">Quick prompts:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {["3D Client-Server", "Microservices", "Database Schema", "Network Topology", "UML Diagram", "Cloud Architecture"].map((preset) => (
-                <button
-                  key={preset}
-                  onClick={() => setAiPrompt(preset)}
-                  className="px-2 py-1 bg-[#1a1a2e] hover:bg-[#252540] text-gray-400 text-[9px] rounded border border-[#333] cursor-pointer transition-colors"
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedId && (
-        <div className="absolute top-[10px] left-1/2 -translate-x-1/2 bg-ct-card border border-[#2a2a2a] rounded-xl p-[6px_14px] z-20 flex gap-2.5 items-center shadow-2xl">
-          <span className="text-[11px] text-gray-400">Element selected — drag to move</span>
-          <button onClick={deleteSelected} className="p-[4px_10px] bg-red-500/20 border border-red-500/40 rounded-md text-red-400 cursor-pointer text-[11px] font-bold flex items-center gap-1 hover:bg-red-500/30">
-            <Trash2 size={11}/> Delete
-          </button>
-          <button onClick={() => setSelectedId(null)} className="p-[4px_10px] bg-[#222222] border border-[#333333] rounded-md text-gray-400 cursor-pointer text-[11px] hover:text-white">
-            Deselect
-          </button>
-        </div>
-      )}
-
-      <div ref={scrollRef} className="flex-1 relative overflow-auto bg-black">
-        <div style={{
-          width: canvasSize.width,
-          height: canvasSize.height,
-          position: "relative",
-          transform: is3DMode
-            ? `perspective(1200px) rotateX(${cameraAngle.rotateX}deg) rotateZ(${cameraAngle.rotateZ}deg) translate(${panOffset.x}px, ${panOffset.y}px)`
-            : `translate(${panOffset.x}px, ${panOffset.y}px)`,
-          transformStyle: "preserve-3d"
-        }}>
-          <canvas ref={canvasRef}
-            className="absolute top-0 left-0 block"
-            style={{ width: canvasSize.width, height: canvasSize.height, cursor: cursors[tool] }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={() => { if (drawing.current) { drawing.current = false; clearOverlay(); } }}
-          />
-          <canvas
-            ref={overlayRef}
-            className="absolute top-0 left-0 pointer-events-none"
-            style={{ width: canvasSize.width, height: canvasSize.height }}
-          />
-
-        {textInput.visible && (
-          <div
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseMove={(e) => e.stopPropagation()}
-            onMouseUp={(e) => e.stopPropagation()}
-            style={{ left: textInput.x, top: Math.max(8, textInput.y - fontSize) }}
-            className="absolute z-30"
-          >
-            <textarea
-              ref={textAreaRef}
-              autoFocus
-              value={textInput.value}
-              onChange={e => setTextInput(p => ({ ...p, value: e.target.value }))}
-              onKeyDown={e => {
-                if (e.key === "Escape") { setTextInput(p => ({ ...p, visible: false })); return; }
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleTextSubmit(); }
-              }}
-              onBlur={() => {
-                window.setTimeout(() => {
-                  if (document.activeElement !== textAreaRef.current) handleTextSubmit();
-                }, 0);
-              }}
-              placeholder="Type here, Enter to place..."
-              className="bg-ct-dark-black/90 border-1.5 border-dashed border-white rounded-md text-white outline-none min-w-[140px] min-h-[76px] p-[4px_8px] resize-none leading-relaxed backdrop-blur-sm pointer-events-auto"
-              style={{ color, fontSize, fontFamily: `"${fontFamily}", sans-serif` }}
-              rows={3}
-            />
-            <div className="text-[10px] text-gray-500 mt-0.5">Enter = place · Shift+Enter = newline · Esc = cancel</div>
-          </div>
-        )}
-
-        {elements.length === 0 && !textInput.visible && (
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none text-gray-500" style={{ width: canvasSize.width }}>
-            <div className="text-4xl mb-2.5">✏️</div>
-            <p className="text-xs">Pick a tool and start drawing</p>
-            <p className="text-[11px] mt-1 text-gray-600">Canvas expands and scrolls as your diagram grows</p>
-          </div>
-        )}
         </div>
       </div>
+
+      {/* Canvas Area */}
+      <div className="flex-1 pt-[58px] relative min-w-0">
+        <div ref={scrollRef} className="h-full w-full overflow-auto bg-black" onPaste={handlePaste} onDragOver={handleDragOver} onDrop={handleDrop}>
+          <div style={{
+            width: canvasSize.width * zoom,
+            height: canvasSize.height * zoom,
+            position: "relative",
+            transform: is3DMode
+              ? `perspective(1200px) rotateX(${cameraAngle.rotateX}deg) rotateZ(${cameraAngle.rotateZ}deg) scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`
+              : `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`,
+            transformOrigin: "0 0",
+            transformStyle: "preserve-3d",
+          }}>
+            <canvas ref={canvasRef}
+              className="absolute top-0 left-0 block"
+              style={{ width: canvasSize.width, height: canvasSize.height, cursor: cursors[tool] }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={() => { if (drawing.current) { drawing.current = false; clearOverlay(); } }}
+            />
+            <canvas ref={overlayRef} className="absolute top-0 left-0 pointer-events-none" style={{ width: canvasSize.width, height: canvasSize.height }} />
+
+            {textInput.visible && (
+              <div style={{ left: textInput.x, top: Math.max(8, textInput.y - fontSize) }} className="absolute z-30 pointer-events-none">
+                <textarea ref={textAreaRef} autoFocus value={textInput.value} onChange={e => setTextInput(p => ({ ...p, value: e.target.value }))} onKeyDown={e => { if (e.key === "Escape") { setTextInput(p => ({ ...p, visible: false })); return; } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleTextSubmit(); } }} placeholder="Type here, Enter to place..." className="pointer-events-auto bg-black/90 border-1.5 border-dashed border-white rounded-md text-white outline-none min-w-[140px] min-h-[76px] p-[4px_8px] resize-none leading-relaxed backdrop-blur-sm" style={{ color, fontSize, fontFamily: `"${fontFamily}", sans-serif` }} rows={3} />
+                <div className="text-[10px] text-gray-500 mt-0.5 pointer-events-none">Enter = place · Shift+Enter = newline · Esc = cancel</div>
+              </div>
+            )}
+
+            {elements.length === 0 && !textInput.visible && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none text-gray-500" style={{ width: canvasSize.width }}>
+                <div className="text-4xl mb-2.5">✏️</div>
+                <p className="text-xs">Pick a tool and start drawing</p>
+                <p className="text-[11px] mt-1 text-gray-600">Canvas expands and scrolls as your diagram grows</p>
+                <p className="text-[11px] mt-1 text-gray-600">Drag & drop images, paste (Ctrl+V), or use the image tool</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Selected Image Controls */}
+        {selectedImage && (
+          <div className="fixed bottom-20 right-4 z-40 bg-black/90 border border-white/20 rounded-xl p-3 flex items-center gap-2 shadow-xl">
+            <button onClick={() => handleImageAction("minimize")} title="Minimize" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Minimize2 size={14}/></button>
+            <button onClick={() => handleImageAction("maximize")} title="Maximize" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Maximize2 size={14}/></button>
+            <button onClick={() => handleImageAction("copy")} title="Copy" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Copy size={14}/></button>
+            <button onClick={() => handleImageAction("rotate")} title="Rotate" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><RotateIcon size={14}/></button>
+            <button onClick={() => handleImageAction("delete")} title="Delete" className="p-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400"><TrashIcon size={14}/></button>
+            <button onClick={() => { setSelectedImage(null); setSelectedId(null); }} className="p-2 rounded bg-white/10 hover:bg-white/20 text-white ml-2">Done</button>
+          </div>
+        )}
+
+        {/* Selected Element Actions */}
+        {selectedId && !selectedImage && (
+          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 bg-ct-dark-black border border-white/20 rounded-xl p-3 flex items-center gap-2 shadow-xl">
+            <span className="text-xs text-gray-400">Element selected — drag to move</span>
+            <button onClick={deleteSelected} className="p-2 rounded bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30"><Trash2 size={12}/></button>
+            <button onClick={() => { setSelectedId(null); setSelectedImage(null); }} className="p-2 rounded bg-white/10 hover:bg-white/20 text-gray-400 hover:text-white">Deselect</button>
+          </div>
+        )}
+
+        {/* History Indicator */}
+        <div className="fixed bottom-4 left-4 z-20 bg-black/80 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400">
+          History: {historyIndex + 1} / {history.length} · <kbd className="px-1.5 py-0.5 bg-white/10 rounded">Ctrl+Z</kbd> Undo · <kbd className="px-1.5 py-0.5 bg-white/10 rounded">Ctrl+Y</kbd> Redo
+        </div>
+      </div>
+
+      {/* Floating Panels */}
+      {showFontPanel && (
+        <div className="fixed top-20 right-4 z-30 bg-ct-card border border-[#2a2a2a] rounded-xl p-3.5 w-[200px] shadow-2xl">
+          <div className="text-[11px] text-gray-400 font-bold mb-2.5 uppercase tracking-wider">Text Options</div>
+          <div className="mb-2.5"><label className="text-[11px] text-gray-400 block mb-1">Font Size: {fontSize}px</label><input type="range" min={12} max={72} value={fontSize} onChange={e => setFontSize(+e.target.value)} className="w-full accent-white"/></div>
+          <div><label className="text-[11px] text-gray-400 block mb-1.5">Font Family</label>{FONTS.map(f => (<button key={f} onClick={() => setFontFamily(f)} className={`block w-full text-left p-[5px_8px] rounded-md border-none cursor-pointer text-xs mb-0.5 ${fontFamily === f ? "bg-white/20 text-white font-bold" : "bg-transparent text-gray-400 hover:text-white"}`} style={{ fontFamily: f }}>{f}</button>))}</div>
+        </div>
+      )}
+
+      {is3DMode && (
+        <div className="fixed top-20 left-4 z-30 bg-ct-card border border-white/30 rounded-xl p-3.5 w-[220px] shadow-2xl">
+          <div className="text-[11px] text-white font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5"><Box size={12}/> 3D Mode Controls</div>
+          <div className="space-y-3">
+            <div><label className="text-[10px] text-gray-400 block mb-1">Depth: {depth3D}px</label><input type="range" min={10} max={80} value={depth3D} onChange={e => setDepth3D(+e.target.value)} className="w-full accent-blue-500"/></div>
+            <div><label className="text-[10px] text-gray-400 block mb-1">Rotation: {cameraAngle.rotateZ}°</label><input type="range" min={-180} max={180} value={cameraAngle.rotateZ} onChange={e => setCameraAngle(p => ({ ...p, rotateZ: +e.target.value }))} className="w-full accent-blue-500"/></div>
+            <button onClick={() => setCameraAngle({ rotateX: 60, rotateZ: -45 })} className="w-full py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-300 text-[10px] rounded-lg border border-[#333333] cursor-pointer flex items-center justify-center gap-1"><RotateCcw size={10}/> Reset View</button>
+          </div>
+          <p className="text-[9px] text-gray-500 mt-3 leading-relaxed">3D boxes show depth effect. Use AI to generate 3D architecture.</p>
+        </div>
+      )}
+
+      {showAiPanel && (
+        <div className="fixed top-20 right-4 z-30 bg-ct-card border border-white/30 rounded-xl p-3.5 w-[320px] shadow-2xl">
+          <div className="flex items-center justify-between mb-3"><div className="text-[11px] text-white font-bold uppercase tracking-wider flex items-center gap-1.5"><Sparkles size={12}/> AI Architecture Generator</div><button onClick={() => setShowAiPanel(false)} className="text-gray-500 hover:text-white text-xs">✕</button></div>
+          <p className="text-[10px] text-gray-400 mb-3 leading-relaxed">Describe what you want to draw and AI will generate it on the whiteboard.</p>
+          <div className="mb-3"><textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} placeholder="Describe the architecture you want to create...&#10;&#10;Examples:&#10;- Draw a 3D client-server architecture&#10;- Create a microservices diagram&#10;- Draw a database schema&#10;- Create a network topology" className="w-full h-[120px] bg-[#1a1a2e] border border-[#333] rounded-lg p-2.5 text-white text-xs resize-none outline-none focus:border-white/50 placeholder-gray-500" style={{ fontFamily: '"Inter", sans-serif' }} /></div>
+          <div className="space-y-2">
+            <button onClick={async () => { if (!aiPrompt.trim()) return; setAiGenerating(true); setAiStatus("idle"); try { const response = await fetch("/api/ai-whiteboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt, roomId, type: "3d" }) }); const data = await response.json(); if (data.elements && data.elements.length > 0) { const newElements = data.elements.map((el: Record<string, unknown>, i: number) => toWbElement(el, i)); pushState([...elements, ...newElements]); setAiStatus("success"); setTimeout(() => setAiStatus("idle"), 3000); } else { setAiStatus("error"); setTimeout(() => setAiStatus("idle"), 3000); } } catch (err) { console.error("AI generation failed:", err); setAiStatus("error"); setTimeout(() => setAiStatus("idle"), 3000); } setAiGenerating(false); }} disabled={aiGenerating || !aiPrompt.trim()} className="w-full py-2.5 bg-white hover:bg-gray-200 disabled:bg-gray-800 disabled:opacity-50 text-black disabled:text-gray-500 text-xs font-bold rounded-lg border-none cursor-pointer transition-colors">{aiGenerating ? "Generating..." : "Generate 3D Architecture"}</button>
+            <button onClick={async () => { if (!aiPrompt.trim()) return; setAiGenerating(true); setAiStatus("idle"); try { const response = await fetch("/api/ai-whiteboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: aiPrompt, roomId, type: "flowchart" }) }); const data = await response.json(); if (data.elements && data.elements.length > 0) { const newElements = data.elements.map((el: Record<string, unknown>, i: number) => toWbElement(el, i)); pushState([...elements, ...newElements]); setAiStatus("success"); setTimeout(() => setAiStatus("idle"), 3000); } else { setAiStatus("error"); setTimeout(() => setAiStatus("idle"), 3000); } } catch (err) { console.error("AI generation failed:", err); setAiStatus("error"); setTimeout(() => setAiStatus("idle"), 3000); } setAiGenerating(false); }} disabled={aiGenerating || !aiPrompt.trim()} className="w-full py-2 bg-[#222222] hover:bg-[#333333] disabled:opacity-50 text-gray-300 text-xs font-bold rounded-lg border border-[#333333] cursor-pointer transition-colors">{aiGenerating ? "Generating..." : "Generate Flow Diagram"}</button>
+            {aiStatus === "success" && <p className="text-[10px] text-green-400 mt-2 text-center">✓ Diagram generated successfully!</p>}
+            {aiStatus === "error" && <p className="text-[10px] text-red-400 mt-2 text-center">✗ Failed to generate. Try again.</p>}
+          </div>
+          <div className="mt-3 pt-3 border-t border-[#333]"><p className="text-[9px] text-gray-500 mb-2">Quick prompts:</p><div className="flex flex-wrap gap-1.5">{["3D Client-Server", "Microservices", "Database Schema", "Network Topology", "UML Diagram", "Cloud Architecture"].map((preset) => (<button key={preset} onClick={() => setAiPrompt(preset)} className="px-2 py-1 bg-[#1a1a2e] hover:bg-[#252540] text-gray-400 text-[9px] rounded border border-[#333] cursor-pointer transition-colors">{preset}</button>))}</div></div>
+        </div>
+      )}
     </div>
   );
 }

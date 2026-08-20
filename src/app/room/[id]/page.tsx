@@ -11,6 +11,7 @@ import StatusBar from "@/components/StatusBar";
 import TerminalPanel from "@/components/TerminalPanel";
 import ToastContainer, { type ToastData } from "@/components/Toast";
 import BreadcrumbBar from "@/components/BreadcrumbBar";
+import ParticipantsCallPanel from "@/components/ParticipantsCallPanel";
 import { type FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 import { type RemoteCursor } from "@/components/Editor";
@@ -247,6 +248,15 @@ function buildPreviewSrcDoc(files: FileItem[], activeFile: string) {
   }
 
   return html;
+}
+
+function escapePreviewHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function getLangFromPath(path: string) {
@@ -687,7 +697,7 @@ export default function RoomPage() {
             file: normalizePath(payload.file),
             line: Number(payload.line) || 1,
             col: Number(payload.col) || 1,
-            color: payload.color || "#22d3ee",
+            color: payload.color || "#ffffff",
             updatedAt: Date.now(),
           },
         }));
@@ -1055,7 +1065,7 @@ export default function RoomPage() {
           file: activeFile,
           line,
           col,
-          color: "#22d3ee",
+          color: "#ffffff",
         },
       });
     }, 80);
@@ -1105,7 +1115,7 @@ export default function RoomPage() {
     return (
       <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#1e1e1e", color: "#858585" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 40, height: 40, border: "3px solid #333", borderTopColor: "#007acc", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
+          <div style={{ width: 40, height: 40, border: "3px solid #333", borderTopColor: "#ffffff", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
           <p style={{ fontSize: 14 }}>Loading room…</p>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -1165,6 +1175,51 @@ export default function RoomPage() {
           onApplyCode={handleApplyCodeToWorkspace}
         />
 
+        <div
+          style={{
+            width: activePanel === "participants" ? 280 : 0,
+            minWidth: activePanel === "participants" ? 280 : 0,
+            height: "100%",
+            position: "relative",
+            zIndex: activePanel === "participants" ? 60 : 1,
+            overflow: "visible",
+            borderRight: activePanel === "participants" ? "1px solid #2b2b2b" : "none",
+            transition: "width 0.2s, min-width 0.2s",
+            pointerEvents: activePanel === "participants" || isCallJoined ? "auto" : "none",
+          }}
+        >
+          <div
+            style={{
+              width: 280,
+              height: "100%",
+              transform: activePanel === "participants" ? "translateX(0)" : "translateX(-320px)",
+              transition: "transform 0.2s",
+              pointerEvents: activePanel === "participants" ? "auto" : "none",
+            }}
+          >
+            <ParticipantsCallPanel
+              members={members}
+              currentUserId={currentUserId}
+              currentUserName={currentUserName}
+              roomId={room.id}
+              micOn={micOn}
+              cameraOn={cameraOn}
+              screenOn={screenOn}
+              isFullscreen={isFullscreen}
+              onFullscreenChange={setIsFullscreen}
+              onMicToggle={handleMicToggle}
+              onCameraToggle={handleCameraToggle}
+              onScreenToggle={handleScreenToggle}
+              isHost={room.created_by === currentUserId}
+              hostUserId={room.created_by || undefined}
+              onAddToast={addToast}
+              isCallJoined={isCallJoined}
+              onCallJoinedChange={setIsCallJoined}
+              isDocked={activePanel === "participants"}
+            />
+          </div>
+        </div>
+
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
           {/* Editor Tabs */}
           <EditorTabs
@@ -1219,7 +1274,7 @@ export default function RoomPage() {
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#1a1a2e", borderBottom: "1px solid #2a2a38" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Eye size={14} color="#7C3AED" />
+                  <Eye size={14} color="#ffffff" />
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>
                       {projectPreviewUrl ? "Live Project Web Server" : previewMode === "project" ? "Full Project Preview" : previewMode === "folder" ? "Folder Preview" : "File Preview"}
@@ -1269,7 +1324,7 @@ export default function RoomPage() {
                     </select>
                   )}
                   
-                  <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#7C3AED22", border: "1px solid #7C3AED55", borderRadius: 6, color: "#c4b5fd", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                  <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ffffff22", border: "1px solid #ffffff55", borderRadius: 6, color: "#ffffff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                     <Play size={11} /> Run Code
                   </button>
                   <button onClick={togglePreviewFullscreen} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", cursor: "pointer", fontSize: 11 }}>
@@ -1317,14 +1372,14 @@ export default function RoomPage() {
                           📄 {activeFile || "Workspace File"} Output Preview
                         </div>
                         <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-                          Project Language: <strong style={{ color: "#c4b5fd" }}>{currentLang}</strong> · Interactive Console & Terminal Output
+                          Project Language: <strong style={{ color: "#ffffff" }}>{currentLang}</strong> · Interactive Console & Terminal Output
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => setTerminalLogs([])} style={{ padding: "4px 10px", background: "#1e1e2d", border: "1px solid #33334d", borderRadius: 6, color: "#aaa", fontSize: 11, cursor: "pointer" }}>
                           Clear Output
                         </button>
-                        <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "4px 12px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                        <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "4px 12px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 6, color: "#000", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
                           ▶ Execute Project
                         </button>
                       </div>
@@ -1333,16 +1388,16 @@ export default function RoomPage() {
                     {/* Output Content */}
                     {activeFile?.endsWith(".md") ? (
                       <div style={{ background: "#0d0d14", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7, fontFamily: "Inter, sans-serif" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", marginBottom: 12, letterSpacing: "0.08em" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#ffffff", textTransform: "uppercase", marginBottom: 12, letterSpacing: "0.08em" }}>
                           Markdown Document Preview
                         </div>
                         <div dangerouslySetInnerHTML={{
-                          __html: (activeFileItem?.content || "")
+                          __html: escapePreviewHtml(activeFileItem?.content || "")
                             .replace(/^# (.*$)/gim, '<h1 style="font-size:22px;color:#fff;margin:12px 0 6px">$1</h1>')
-                            .replace(/^## (.*$)/gim, '<h2 style="font-size:18px;color:#c4b5fd;margin:10px 0 4px">$1</h2>')
+                            .replace(/^## (.*$)/gim, '<h2 style="font-size:18px;color:#ffffff;margin:10px 0 4px">$1</h2>')
                             .replace(/^### (.*$)/gim, '<h3 style="font-size:15px;color:#e2e8f0;margin:8px 0 4px">$1</h3>')
                             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/`([^`]+)`/g, '<code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;color:#c4b5fd">$1</code>')
+                            .replace(/`([^`]+)`/g, '<code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;color:#ffffff">$1</code>')
                             .replace(/\n/g, '<br/>')
                         }} />
                       </div>
@@ -1364,7 +1419,7 @@ export default function RoomPage() {
                           This project will display its live execution output here. Run your script or project from the terminal, or click the button below to start.
                         </p>
                         <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-                          <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "8px 18px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+                          <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "8px 18px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 8, color: "#000", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
                             ▶ Execute {activeFile || "Project"} Now
                           </button>
                           <button onClick={() => setTerminalOpen(true)} style={{ padding: "8px 16px", background: "#1a1a28", border: "1px solid #33334d", borderRadius: 8, color: "#ccc", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
@@ -1485,7 +1540,7 @@ export default function RoomPage() {
               <button
                 onClick={handlePublishToLibrary}
                 disabled={publishing}
-                style={{ flex: 1, padding: "10px", border: "none", borderRadius: 8, background: publishing ? "#333" : "linear-gradient(135deg,#7C3AED,#5b21b6)", color: "#fff", cursor: publishing ? "default" : "pointer", fontWeight: 800, fontSize: 13 }}
+                style={{ flex: 1, padding: "10px", border: "none", borderRadius: 8, background: publishing ? "#333" : "linear-gradient(135deg,#ffffff,#cccccc)", color: publishing ? "#fff" : "#000", cursor: publishing ? "default" : "pointer", fontWeight: 800, fontSize: 13 }}
               >
                 {publishing ? "Publishing..." : "Publish Now"}
               </button>
@@ -1506,7 +1561,7 @@ export default function RoomPage() {
             animation: "pcp-fadeIn 0.25s ease-out"
           }}>
             <div style={{ textAlign: "center", marginBottom: 20 }}>
-              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "grid", placeItems: "center", margin: "0 auto 12px", color: "#fff", fontSize: 24, fontWeight: 800, boxShadow: "0 0 20px rgba(124,58,237,0.5)" }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#ffffff,#cccccc)", display: "grid", placeItems: "center", margin: "0 auto 12px", color: "#000", fontSize: 24, fontWeight: 800, boxShadow: "0 0 20px rgba(255,255,255,0.35)" }}>
                 {tempNickname.trim() ? tempNickname.trim().charAt(0).toUpperCase() : "👋"}
               </div>
               <h2 style={{ margin: 0, fontSize: 20, color: "#fff", fontWeight: 800, letterSpacing: "-0.01em" }}>Enter Your Nickname</h2>
@@ -1531,19 +1586,19 @@ export default function RoomPage() {
               style={{ display: "flex", flexDirection: "column", gap: 14 }}
             >
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#c4b5fd", textTransform: "uppercase", marginBottom: 6 }}>NICKNAME / ALIAS</label>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#ffffff", textTransform: "uppercase", marginBottom: 6 }}>NICKNAME / ALIAS</label>
                 <input
                   autoFocus
                   value={tempNickname}
                   onChange={(e) => setTempNickname(e.target.value)}
                   placeholder="e.g. Alex, CodeGuru, Ramji"
-                  style={{ width: "100%", background: "#1a1a24", border: "1px solid #7C3AED66", borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px", outline: "none", boxSizing: "border-box" }}
+                  style={{ width: "100%", background: "#1a1a24", border: "1px solid #ffffff66", borderRadius: 8, color: "#fff", fontSize: 14, padding: "10px 12px", outline: "none", boxSizing: "border-box" }}
                 />
               </div>
 
               <button
                 type="submit"
-                style={{ width: "100%", padding: 12, border: "none", borderRadius: 8, background: "linear-gradient(135deg,#7C3AED,#5b21b6)", color: "#fff", cursor: "pointer", fontWeight: 800, fontSize: 14, boxShadow: "0 4px 16px rgba(124,58,237,0.4)" }}
+                style={{ width: "100%", padding: 12, border: "none", borderRadius: 8, background: "linear-gradient(135deg,#ffffff,#cccccc)", color: "#000", cursor: "pointer", fontWeight: 800, fontSize: 14, boxShadow: "0 4px 16px rgba(255,255,255,0.35)" }}
               >
                 Join Room as &ldquo;{tempNickname.trim() || "Guest"}&rdquo;
               </button>

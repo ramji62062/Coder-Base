@@ -47,8 +47,6 @@ type DragPoint = { x: number; y: number };
 function LandingDanceCard({
   children,
   className = "",
-  delay = 0,
-  amplitude = 1,
   onClick,
 }: {
   children: ReactNode;
@@ -57,36 +55,10 @@ function LandingDanceCard({
   amplitude?: number;
   onClick?: () => void;
 }) {
-  const [drag, setDrag] = useState<DragPoint>({ x: 0, y: 0 });
-  const [start, setStart] = useState<DragPoint | null>(null);
-  const [moved, setMoved] = useState(false);
-
   return (
     <div
-      className={`landing-dance-card ${className}`}
-      style={{
-        "--dance-delay": `${delay}s`,
-        "--dance-amplitude": amplitude,
-        transform: `translate3d(${drag.x}px, ${drag.y}px, 0)`,
-      } as CSSProperties}
-      onPointerDown={(event) => {
-        if ((event.target as HTMLElement).closest("button, input")) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        setMoved(false);
-        setStart({ x: event.clientX - drag.x, y: event.clientY - drag.y });
-      }}
-      onPointerMove={(event) => {
-        if (!start) return;
-        const nextX = Math.max(-34, Math.min(34, event.clientX - start.x));
-        const nextY = Math.max(-24, Math.min(24, event.clientY - start.y));
-        if (Math.abs(nextX - drag.x) > 2 || Math.abs(nextY - drag.y) > 2) setMoved(true);
-        setDrag({ x: nextX, y: nextY });
-      }}
-      onPointerUp={() => setStart(null)}
-      onPointerCancel={() => setStart(null)}
-      onClick={() => {
-        if (!moved) onClick?.();
-      }}
+      className={`border border-white/10 bg-white/[0.03] shadow-[0_18px_42px_rgba(0,0,0,0.28)] ${className}`}
+      onClick={onClick}
     >
       {children}
     </div>

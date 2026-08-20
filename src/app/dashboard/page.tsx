@@ -573,6 +573,12 @@ export default function DashboardPage() {
 
   const cfg = ROLE_CONFIG[user?.role || "student"] || ROLE_CONFIG.student;
   const RoleIcon = cfg.icon;
+  const tabClass = (tab: string) =>
+    `cursor-pointer rounded-lg px-[18px] py-2.5 text-[13px] font-bold transition-all duration-200 ${
+      activeTab === tab
+        ? "border border-white/25 bg-white/10 text-white"
+        : "border border-transparent bg-transparent text-[#666]"
+    }`;
   const userName = user?.name || "there";
   const filtered = rooms.filter((r) =>
     getRoomDisplayName(r.name).toLowerCase().includes(search.toLowerCase()) ||
@@ -627,110 +633,189 @@ export default function DashboardPage() {
     );
   });
 
-  const LANG_COLORS: Record<string, string> = { javascript: "#f1e05a", typescript: "#3178c6", python: "#3572A5", java: "#b07219", go: "#00ADD8", rust: "#dea584", html: "#e34c26", css: "#563d7c", cpp: "#f34b7d" };
+  const LANG_COLORS: Record<string, string> = { javascript: "#f1e05a", typescript: "#ffffff", python: "#000000", java: "#b07219", go: "#ffffff", rust: "#dea584", html: "#e34c26", css: "#563d7c", cpp: "#f34b7d" };
+
+  const STEPS = [
+    { id: "create", title: "Create Project", desc: "Start a new workspace", icon: <Plus size={24} color="#ffffff" /> },
+    { id: "code", title: "Write Code", desc: "Monaco Editor + AI", icon: <Code2 size={24} color="#ffffff" /> },
+    { id: "collaborate", title: "Collaborate", desc: "Real-time with team", icon: <Users size={24} color="#10B981" /> },
+    { id: "preview", title: "Live Preview", desc: "See changes instantly", icon: <Zap size={24} color="#F59E0B" /> },
+    { id: "share", title: "Share", desc: "Deploy anywhere", icon: <Globe size={24} color="#EF4444" /> },
+  ];
+
+function AnimatedCard({ step, delay }: { step: { id: string; title: string; desc: string; icon: React.ReactNode }; delay: number }) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const { innerWidth, innerHeight } = window;
+      setOffset({
+        x: ((e.clientX / innerWidth) - 0.5) * 10,
+        y: ((e.clientY / innerHeight) - 0.5) * 10,
+      });
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
+
+  return (
+    <div
+      className="group"
+      style={{
+        animation: `fadeUp 0.8s ease-out ${delay}s forwards`,
+        opacity: 0,
+        transform: `perspective(1000px) rotateX(${offset.y}deg) rotateY(${offset.x}deg)`,
+        transition: "transform 0.1s ease-out",
+      }}
+    >
+      <div className="flex h-full cursor-grab select-none flex-col gap-3.5 rounded-[20px] border border-ct-border bg-black p-8 text-center transition-all duration-300 hover:border-ct-subtle hover:shadow-[0_0_30px_rgba(255,255,255,0.15)]">
+        <div className="mx-auto flex h-[70px] w-[70px] items-center justify-center rounded-full border border-white/25 bg-white/20">
+          {step.icon}
+        </div>
+        <h3 className="m-0 text-base font-bold text-white">{step.title}</h3>
+        <p className="m-0 text-[13px] leading-normal text-[#888]">{step.desc}</p>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceCard({
+  room,
+  displayName,
+  schedule,
+  LANG_COLORS,
+  copiedCode,
+  onCopy,
+  onDelete,
+  onOpen,
+}: {
+  room: Room;
+  displayName: string;
+  schedule: { isScheduled: boolean; startAt?: string; endAt?: string; invitedEmails: string[] };
+  LANG_COLORS: Record<string, string>;
+  copiedCode: string | null;
+  onCopy: (code: string) => void;
+  onDelete: (id: string) => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      className="group flex cursor-pointer flex-col gap-3.5 rounded-2xl border border-[#111] bg-black p-5 transition-all duration-200 hover:-translate-y-1 hover:border-ct-subtle"
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="mb-1 flex items-center gap-1.5">
+            <h3 className="m-0 text-[15px] font-bold text-white">{displayName}</h3>
+            {schedule.isScheduled && (
+              <span className="rounded bg-white/10 px-1.5 py-px text-[10px] font-bold text-white">
+                Scheduled
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ background: LANG_COLORS[room.language] || "#888" }}/>
+            <span className="text-xs text-[#777]">{room.language}</span>
+          </div>
+        </div>
+        <button onClick={() => onDelete(room.id)} className="cursor-pointer rounded-md border-none bg-transparent p-1 text-[#444] transition-colors hover:text-[#ff6b6b]">
+          <Trash2 size={14}/>
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1.5 rounded-lg border border-[#111] bg-[#0a0a0a] px-2.5 py-1.5">
+        <Hash size={11} color="#555"/>
+        <span className="font-mono text-xs font-bold tracking-[2px] text-[#777]">{room.room_code}</span>
+        <button onClick={(e) => { e.stopPropagation(); onCopy(room.room_code); }} className={`cursor-pointer border-none bg-transparent p-0 ${copiedCode === room.room_code ? "text-[#4ade80]" : "text-[#555]"}`}>
+          {copiedCode === room.room_code ? <Check size={11}/> : <Copy size={11}/>}
+        </button>
+      </div>
+
+      <button onClick={onOpen}
+        className="flex cursor-pointer items-center justify-center gap-2 rounded-[10px] border border-[#222] bg-[#111] p-2.5 text-[13px] font-bold text-white transition-colors hover:bg-[#222]"
+      >
+        <ArrowRight size={14}/> Open Workspace
+      </button>
+    </div>
+  );
+}
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: "#080810", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ width: 48, height: 48, borderRadius: "50%", border: "3px solid #7C3AED33", borderTop: "3px solid #7C3AED", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
-        <p style={{ color: "#666", fontSize: 14 }}>Loading your dashboard...</p>
+    <div className="flex min-h-screen items-center justify-center bg-[#080810]">
+      <div className="text-center">
+        <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-[3px] border-white/20 border-t-white" />
+        <p className="text-sm text-[#666]">Loading your dashboard...</p>
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080810", color: "#e0e0e0", fontFamily: "Inter, sans-serif" }}>
+    <div className="min-h-screen bg-[#080810] font-inter text-[#e0e0e0]">
       {/* Top navbar */}
-      <header className="glass-header animate-slide-up" style={{ height: 60, borderBottom: "1px solid #1a1a2e", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 28px", position: "sticky", top: 0, zIndex: 100 }}>
-        <Link href="/" style={{ fontSize: 20, fontWeight: 900, color: "#7C3AED", textDecoration: "none" }}>
-          Code<span style={{ color: "#c4b5fd" }}>Together</span>
+      <header className="glass-header sticky top-0 z-[100] flex h-[60px] animate-slide-up items-center justify-between border-b border-ct-border px-7">
+        <Link href="/" className="text-xl font-black text-white no-underline">
+          Code<span className="text-white">Together</span>
         </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div className="flex items-center gap-4">
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: cfg.color + "15", border: `1px solid ${cfg.color}30`, borderRadius: 20, padding: "5px 12px" }}>
             <RoleIcon size={14} color={cfg.color}/>
             <span style={{ fontSize: 12, color: cfg.color, fontWeight: 700 }}>{cfg.label}</span>
           </div>
-          <div style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "#fff" }}>
+          <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-gradient-to-br from-white to-[#cccccc] text-[13px] font-extrabold text-black">
             {(user?.name || user?.email || "U").charAt(0).toUpperCase()}
           </div>
           <button onClick={async () => { await supabase.auth.signOut(); router.push("/"); }}
-            style={{ background: "none", border: "1px solid #222", borderRadius: 8, padding: "6px 12px", color: "#666", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#222] bg-transparent px-3 py-1.5 text-[13px] text-[#666]">
             <LogOut size={14}/> Logout
           </button>
         </div>
       </header>
 
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 24px" }}>
+      <div className="mx-auto max-w-[1100px] px-6 py-10">
         {/* Welcome */}
-        <div className="animate-slide-up" style={{ marginBottom: 30 }}>
-          <h1 style={{ fontSize: "clamp(24px,4vw,36px)", fontWeight: 900, letterSpacing: "-0.5px" }}>
+        <div className="mb-[30px] animate-slide-up">
+          <h1 className="text-[clamp(24px,4vw,36px)] font-black">
             {cfg.greeting}, <span style={{ color: cfg.color }}>{user?.name?.split(" ")[0] || "there"}</span> <span className="animate-float" style={{ display: "inline-block" }}>👋</span>
           </h1>
-          <p style={{ color: "#555", fontSize: 15, marginTop: 6 }}>
+          <p className="mt-1.5 text-[15px] text-[#555]">
             {user?.email} · {rooms.length} workspace{rooms.length !== 1 ? "s" : ""}
           </p>
         </div>
 
         {/* Tab Selection */}
-        <div className="animate-slide-up delay-100" style={{ display: "flex", gap: 8, borderBottom: "1px solid #1a1a2e", paddingBottom: 12, marginBottom: 30, flexWrap: "wrap" }}>
+        <div className="mb-[30px] flex animate-slide-up flex-wrap gap-2 border-b border-ct-border pb-3 delay-100">
           <button
             onClick={() => setActiveTab("workspaces")}
-            style={{
-              padding: "10px 18px", background: activeTab === "workspaces" ? "#7C3AED18" : "transparent",
-              color: activeTab === "workspaces" ? "#c4b5fd" : "#666", border: activeTab === "workspaces" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("workspaces")}
           >
             My Workspaces
           </button>
           <button
             onClick={() => setActiveTab("shared_library")}
-            style={{
-              padding: "10px 18px", background: activeTab === "shared_library" ? "#7C3AED18" : "transparent",
-              color: activeTab === "shared_library" ? "#c4b5fd" : "#666", border: activeTab === "shared_library" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("shared_library")}
           >
             🌐 Shared Library (Public)
           </button>
           <button
             onClick={() => setActiveTab("private_library")}
-            style={{
-              padding: "10px 18px", background: activeTab === "private_library" ? "#7C3AED18" : "transparent",
-              color: activeTab === "private_library" ? "#c4b5fd" : "#666", border: activeTab === "private_library" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("private_library")}
           >
             🔒 Private Library (Access Code)
           </button>
           <button
             onClick={() => setActiveTab("community")}
-            style={{
-              padding: "10px 18px", background: activeTab === "community" ? "#7C3AED18" : "transparent",
-              color: activeTab === "community" ? "#c4b5fd" : "#666", border: activeTab === "community" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("community")}
           >
             Community
           </button>
           <button
             onClick={() => setActiveTab("account")}
-            style={{
-              padding: "10px 18px", background: activeTab === "account" ? "#7C3AED18" : "transparent",
-              color: activeTab === "account" ? "#c4b5fd" : "#666", border: activeTab === "account" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("account")}
           >
             My Profile
           </button>
           <button
             onClick={() => setActiveTab("progress")}
-            style={{
-              padding: "10px 18px", background: activeTab === "progress" ? "#7C3AED18" : "transparent",
-              color: activeTab === "progress" ? "#c4b5fd" : "#666", border: activeTab === "progress" ? "1px solid #7C3AED44" : "none",
-              borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
-            }}
+            className={tabClass("progress")}
           >
             Progress Tracking
           </button>
@@ -782,7 +867,7 @@ export default function DashboardPage() {
               <div className="glass-panel hover-card-glow" style={{ borderRadius: 20, padding: 24 }}>
                 <h3 style={{ fontSize: 14, color: "#555", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 20 }}>Your Stats</h3>
                 {[
-                  { label: "Workspaces", value: rooms.length, color: "#7C3AED" },
+                  { label: "Workspaces", value: rooms.length, color: "#ffffff" },
                   { label: "Account Type", value: cfg.label, color: cfg.color },
                   { label: "Status", value: "Active", color: "#4ade80" },
                 ].map(s => (
@@ -827,7 +912,7 @@ export default function DashboardPage() {
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                               <h3 style={{ fontWeight: 700, fontSize: 15, margin: 0 }}>{displayName}</h3>
                               {schedule.isScheduled && (
-                                <span style={{ fontSize: 10, background: "#7C3AED20", color: "#c4b5fd", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>
+                                <span style={{ fontSize: 10, background: "#ffffff20", color: "#ffffff", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>
                                   Scheduled
                                 </span>
                               )}
@@ -847,11 +932,11 @@ export default function DashboardPage() {
                         {schedule.isScheduled && (
                           <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "#111", padding: 10, borderRadius: 10, border: "1px solid #222", fontSize: 11, color: "#aaa" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <Calendar size={11} color="#7C3AED" />
+                              <Calendar size={11} color="#ffffff" />
                               <span>Starts: {new Date(schedule.startAt!).toLocaleString()}</span>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <Clock size={11} color="#7C3AED" />
+                              <Clock size={11} color="#ffffff" />
                               <span>Ends: {new Date(schedule.endAt!).toLocaleString()}</span>
                             </div>
                             {schedule.invitedEmails.length > 0 && (
@@ -922,8 +1007,8 @@ export default function DashboardPage() {
                   onClick={() => setSelectedCategory(cat)}
                   style={{
                     padding: "6px 14px",
-                    background: selectedCategory === cat ? "#7C3AED" : "#0d0d1a",
-                    border: selectedCategory === cat ? "1px solid #7C3AED" : "1px solid #1a1a2e",
+                    background: selectedCategory === cat ? "#ffffff" : "#0d0d1a",
+                    border: selectedCategory === cat ? "1px solid #ffffff" : "1px solid #1a1a2e",
                     borderRadius: 20,
                     color: selectedCategory === cat ? "#fff" : "#888",
                     fontSize: 12,
@@ -952,7 +1037,7 @@ export default function DashboardPage() {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <span style={{ fontSize: 10, background: "#7C3AED20", color: "#c4b5fd", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
+                        <span style={{ fontSize: 10, background: "#ffffff20", color: "#ffffff", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
                           {item.meta?.category || "Project"}
                         </span>
                         <h3 style={{ fontWeight: 800, fontSize: 16, marginTop: 6, color: "#ffffff" }}>
@@ -1073,7 +1158,7 @@ export default function DashboardPage() {
                 {filteredCommunityUsers.map((person) => (
                   <div key={person.id} className="glass-panel hover-card-glow" style={{ borderRadius: 16, padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                      <div style={{ width: 48, height: 48, borderRadius: "50%", background: person.avatar_url || "linear-gradient(135deg,#7C3AED,#0ea5e9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 18, fontWeight: 900, overflow: "hidden" }}>
+                      <div style={{ width: 48, height: 48, borderRadius: "50%", background: person.avatar_url || "linear-gradient(135deg,#ffffff,#cccccc)", display: "flex", alignItems: "center", justifyContent: "center", color: person.avatar_url ? "#fff" : "#000", fontSize: 18, fontWeight: 900, overflow: "hidden" }}>
                         {person.avatar_url?.startsWith("data:") ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={person.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
@@ -1092,14 +1177,14 @@ export default function DashboardPage() {
                         { label: "Status", value: person.following ? "Following" : "Open" },
                       ].map((stat) => (
                         <div key={stat.label} style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
-                          <div style={{ color: "#c4b5fd", fontWeight: 900, fontSize: 14 }}>{stat.value}</div>
+                          <div style={{ color: "#ffffff", fontWeight: 900, fontSize: 14 }}>{stat.value}</div>
                           <div style={{ color: "#666", fontSize: 10, marginTop: 2 }}>{stat.label}</div>
                         </div>
                       ))}
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 36px 36px", gap: 8 }}>
-                      <button onClick={() => toggleFollow(person)} style={{ padding: "9px 10px", background: person.following ? "#222" : "#7C3AED", border: "1px solid #7C3AED55", borderRadius: 10, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                      <button onClick={() => toggleFollow(person)} style={{ padding: "9px 10px", background: person.following ? "#222" : "#ffffff", border: "1px solid #ffffff55", borderRadius: 10, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                         <UserPlus size={14}/> {person.following ? "Following" : "Follow"}
                       </button>
                       <button onClick={() => sendDirectMessage(person)} title={person.profileVisibility === "private" && !(person.following && person.followsMe) ? "Private profile: mutual follow required" : "Message"} style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 10, color: person.profileVisibility === "private" && !(person.following && person.followsMe) ? "#666" : "#4ade80", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1253,9 +1338,9 @@ export default function DashboardPage() {
           <div className="animate-slide-up delay-200" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14 }}>
               {[
-                { label: "Total Workspaces", value: rooms.length, color: "#7C3AED" },
+                { label: "Total Workspaces", value: rooms.length, color: "#ffffff" },
                 { label: "Shared Templates", value: libraryRooms.filter(r => r.created_by === user?.id).length, color: "#10b981" },
-                { label: "Languages Used", value: new Set(rooms.map(r => r.language)).size, color: "#60a5fa" },
+                { label: "Languages Used", value: new Set(rooms.map(r => r.language)).size, color: "#ffffff" },
                 { label: "Student Status", value: cfg.label, color: cfg.color },
               ].map((stat) => (
                 <div key={stat.label} className="glass-panel hover-card-glow" style={{ borderRadius: 16, padding: 18 }}>
@@ -1277,7 +1362,7 @@ export default function DashboardPage() {
             {/* Modal Header */}
             <div style={{ height: 56, borderBottom: "1px solid #2b2b2b", background: "#252526", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 10, background: "#7C3AED20", color: "#c4b5fd", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
+                <span style={{ fontSize: 10, background: "#ffffff20", color: "#ffffff", padding: "2px 8px", borderRadius: 10, fontWeight: 700, textTransform: "uppercase" }}>
                   {exploreItem.meta?.category || "Project"}
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
@@ -1296,7 +1381,7 @@ export default function DashboardPage() {
                 <button
                   onClick={() => handleCloneProject(exploreItem)}
                   disabled={cloningProject}
-                  style={{ padding: "6px 16px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: cloningProject ? "default" : "pointer", display: "flex", alignItems: "center", gap: 5 }}
+                  style={{ padding: "6px 16px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 8, color: "#000", fontSize: 12, fontWeight: 700, cursor: cloningProject ? "default" : "pointer", display: "flex", alignItems: "center", gap: 5 }}
                 >
                   {cloningProject ? "Cloning..." : <><Zap size={13} /> Clone Project</>}
                 </button>
@@ -1332,8 +1417,8 @@ export default function DashboardPage() {
                           padding: "6px 10px",
                           borderRadius: 6,
                           cursor: "pointer",
-                          background: exploreActiveFile === path ? "#7C3AED22" : "transparent",
-                          color: exploreActiveFile === path ? "#c4b5fd" : "#aaa",
+                          background: exploreActiveFile === path ? "#ffffff22" : "transparent",
+                          color: exploreActiveFile === path ? "#ffffff" : "#aaa",
                           fontSize: 12,
                           display: "flex",
                           alignItems: "center",
@@ -1341,7 +1426,7 @@ export default function DashboardPage() {
                           transition: "all 0.15s"
                         }}
                       >
-                        <File size={12} color={exploreActiveFile === path ? "#c4b5fd" : "#666"} />
+                        <File size={12} color={exploreActiveFile === path ? "#ffffff" : "#666"} />
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {path}
                         </span>
@@ -1454,7 +1539,7 @@ export default function DashboardPage() {
               )}
 
               {/* Create Button */}
-              <button onClick={handleCreate} disabled={creating} style={{ width: "100%", padding: "13px", background: creating ? "#333" : "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 12, color: "#fff", fontSize: 15, fontWeight: 800, cursor: creating ? "default" : "pointer", marginTop: 8, transition: "all 0.2s" }}>
+              <button onClick={handleCreate} disabled={creating} style={{ width: "100%", padding: "13px", background: creating ? "#333" : "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 12, color: creating ? "#fff" : "#000", fontSize: 15, fontWeight: 800, cursor: creating ? "default" : "pointer", marginTop: 8, transition: "all 0.2s" }}>
                 {creating ? "Creating..." : "Create Workspace →"}
               </button>
             </div>
@@ -1470,7 +1555,7 @@ export default function DashboardPage() {
               <Shield size={28} color="#f87171" />
             </div>
             <h2 style={{ fontSize: 20, fontWeight: 900, color: "#fff", marginBottom: 6 }}>🔒 Private Workspace</h2>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: "#c4b5fd", marginBottom: 4 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: "#ffffff", marginBottom: 4 }}>
               {getRoomDisplayName(unlockingItem.meta?.title || unlockingItem.name)}
             </h3>
             <p style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>by {unlockingItem.meta?.authorName || "the owner"}</p>
@@ -1492,7 +1577,7 @@ export default function DashboardPage() {
               <button onClick={() => setUnlockingItem(null)} style={{ flex: 1, padding: "11px", background: "#222", border: "1px solid #333", borderRadius: 10, color: "#aaa", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                 Cancel
               </button>
-              <button onClick={handleUnlockPrivateSubmit} style={{ flex: 1, padding: "11px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              <button onClick={handleUnlockPrivateSubmit} style={{ flex: 1, padding: "11px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 10, color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                 🔓 Unlock
               </button>
             </div>
@@ -1517,7 +1602,7 @@ export default function DashboardPage() {
                 const mine = msg.sender_id === user?.id;
                 const canEdit = mine && Date.now() - new Date(msg.created_at).getTime() < 5 * 60 * 1000;
                 return (
-                  <div key={msg.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "86%", background: mine ? "#7C3AED22" : "#111", border: mine ? "1px solid #7C3AED44" : "1px solid #222", borderRadius: 12, padding: 10 }}>
+                  <div key={msg.id} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "86%", background: mine ? "#ffffff22" : "#111", border: mine ? "1px solid #ffffff44" : "1px solid #222", borderRadius: 12, padding: 10 }}>
                     {msg.content && <div style={{ color: "#e5e7eb", fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</div>}
                     {msg.media_url && (
                       msg.media_url.match(/\.(png|jpg|jpeg|gif|webp)$/i) || msg.media_url.startsWith("data:image") ? (
@@ -1529,7 +1614,7 @@ export default function DashboardPage() {
                     )}
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6, color: "#666", fontSize: 10 }}>
                       {msg.edited_at && <span>edited</span>}
-                      {canEdit && <button onClick={() => editMessage(msg)} style={{ background: "none", border: "none", color: "#c4b5fd", cursor: "pointer", fontSize: 10 }}>Edit</button>}
+                      {canEdit && <button onClick={() => editMessage(msg)} style={{ background: "none", border: "none", color: "#ffffff", cursor: "pointer", fontSize: 10 }}>Edit</button>}
                       <button onClick={() => deleteMessage(msg, "mine")} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 10 }}>Delete mine</button>
                       {mine && <button onClick={() => deleteMessage(msg, "both")} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 10 }}>Delete both</button>}
                     </div>
@@ -1553,11 +1638,29 @@ export default function DashboardPage() {
             <p style={{ color: "#777", fontSize: 11, margin: "8px 0 16px" }}>Messages can be edited for 5 minutes. Deleting can be from your side, their side, or both once the inbox view is added.</p>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setMessageTarget(null)} style={{ flex: 1, padding: "11px", background: "#222", border: "1px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 700, cursor: "pointer" }}>Cancel</button>
-              <button onClick={submitDirectMessage} style={{ flex: 1, padding: "11px", background: "linear-gradient(135deg,#7C3AED,#5b21b6)", border: "none", borderRadius: 10, color: "#fff", fontWeight: 800, cursor: "pointer" }}>Send</button>
+              <button onClick={submitDirectMessage} style={{ flex: 1, padding: "11px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 10, color: "#000", fontWeight: 800, cursor: "pointer" }}>Send</button>
             </div>
           </div>
         </div>
       )}
+    
+    <style jsx global>{`
+      @keyframes float-y {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-20px) scale(1.02); }
+      }
+      @keyframes fade-up {
+        from { opacity: 0; transform: translateY(40px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes bounce {
+        0%, 100% { transform: translateY(0) scale(1); }
+        50% { transform: translateY(-10px) scale(1.03); }
+      }
+      .animate-bounce { animation: bounce 2s ease-in-out infinite; }
+      .animate-fade-up { animation: fade-up 0.8s ease-out forwards; opacity: 0; }
+      .workspace-card { opacity: 0; animation: fade-up 0.8s ease-out forwards; }
+    `}</style>
     </div>
   );
 }

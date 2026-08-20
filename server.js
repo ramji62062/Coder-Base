@@ -8,7 +8,7 @@ const dev = process.env.NODE_ENV !== "production";
 function resolveHostname() {
   if (process.env.NODE_ENV === "production") return "0.0.0.0";
   if (process.env.HOSTNAME && process.env.HOSTNAME !== "localhost") return process.env.HOSTNAME;
-  return "127.0.0.1";
+  return "localhost";
 }
 
 const hostname = resolveHostname();

@@ -438,8 +438,13 @@ export default function AIAssistant({
       const decoder = new TextDecoder();
       let streamText = "";
       let buffer = "";
+      const autoWriteEnabled = store.autoWrite;
 
-      setMessages((prev) => [...prev, { role: "assistant", content: "▋", ts: Date.now() }]);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: autoWriteEnabled ? "Auto Generation is writing directly to your workspace..." : "▋",
+        ts: Date.now(),
+      }]);
 
       while (reader) {
         const { value, done } = await reader.read();
@@ -462,30 +467,32 @@ export default function AIAssistant({
             const contentDelta = parsed.choices?.[0]?.delta?.content;
             if (contentDelta && typeof contentDelta === "string") {
               streamText += contentDelta;
-              setMessages((prev) => {
-                const next = [...prev];
-                next[next.length - 1] = { role: "assistant", content: streamText, ts: Date.now() };
-                return next;
-              });
+              if (!autoWriteEnabled) {
+                setMessages((prev) => {
+                  const next = [...prev];
+                  next[next.length - 1] = { role: "assistant", content: streamText, ts: Date.now() };
+                  return next;
+                });
+              }
             }
           } catch {}
         }
       }
 
-      if (streamText && store.autoWrite) {
+      if (streamText && autoWriteEnabled) {
         const appliedFiles = applyAutoActions(streamText);
-        if (appliedFiles.length) {
-          const fileList = appliedFiles.join(", ");
-          setMessages((prev) => {
-            const next = [...prev];
-            next[next.length - 1] = {
-              role: "assistant",
-              content: `Auto Generation completed. Wrote ${appliedFiles.length} file(s) directly to the workspace: ${fileList}.`,
-              ts: Date.now(),
-            };
-            return next;
-          });
-        }
+        const fileList = appliedFiles.join(", ");
+        setMessages((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = {
+            role: "assistant",
+            content: appliedFiles.length
+              ? `Auto Generation completed. Wrote ${appliedFiles.length} file(s) directly to the workspace: ${fileList}.`
+              : "Auto Generation finished, but I could not find a clear target file path to write.",
+            ts: Date.now(),
+          };
+          return next;
+        });
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") {

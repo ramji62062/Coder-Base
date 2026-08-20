@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { X, Trash2, Play, Square, ChevronRight } from "lucide-react";
+import { X, Trash2, Play, Square, ChevronRight, Zap, ChevronDown } from "lucide-react";
 import type { FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 
@@ -86,6 +86,24 @@ function formatApiOutput(data: { stdout?: string; stderr?: string; output?: stri
   return [data.stdout, data.stderr].filter(Boolean).join("\n");
 }
 
+async function readJsonResponse(res: Response) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Server returned ${res.status} ${res.statusText}: ${text.slice(0, 140)}`);
+  }
+}
+
+async function getAuthHeaders() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    "Content-Type": "application/json",
+    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+  };
+}
+
 export default function TerminalPanel({ onClose, roomId, codeRef, language, activeFileName, triggerRun = 0, onWorkSave, files = [], onFilesSync, onPreviewUrlChange, onOutputLog }: TerminalPanelProps) {
   const [height, setHeight] = useState(() => {
     if (typeof window === "undefined") return 280;
@@ -95,6 +113,7 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
   const xtermRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [running, setRunning] = useState(false);
+  const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const sessionId = useRef(`sess_${roomId}_${Date.now()}`);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const inputLineRef = useRef("");
@@ -102,6 +121,25 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
   const runningRef = useRef(false);
   const cwdRef = useRef("");
   const mountedRef = useRef(true);
+
+  const SCAFFOLD_TEMPLATES = [
+    { label: "Vite + React (TS)", cmd: "npm create vite@latest my-app" },
+    { label: "Vite + React (JS)", cmd: "npm create vite@latest my-app" },
+    { label: "Vite + Vue (TS)", cmd: "npm create vite@latest my-app" },
+    { label: "Vite + Vue (JS)", cmd: "npm create vite@latest my-app" },
+    { label: "Vite + Svelte", cmd: "npm create vite@latest my-app" },
+    { label: "Next.js", cmd: "npx create-next-app@latest my-app" },
+    { label: "Empty (package.json)", cmd: "mkdir -p my-project && cd my-project && npm init -y" },
+  ];
+
+  const executeScaffold = useCallback(async (cmd: string) => {
+    if (!xtermRef.current) return;
+    setScaffoldOpen(false);
+    const term = xtermRef.current;
+    term.writeln(`\r\n\x1b[1;36m⚡ Scaffolding project...\x1b[0m`);
+    term.writeln(`\x1b[90m$ ${cmd}\x1b[0m\r\n`);
+    await executeCommand(cmd);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -120,6 +158,16 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
     xtermRef.current.write(getPrompt());
     inputLineRef.current = "";
   }, [getPrompt]);
+
+  useEffect(() => {
+    if (!scaffoldOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-scaffold-dropdown]")) setScaffoldOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [scaffoldOpen]);
 
   useEffect(() => {
     if (!termRef.current || xtermRef.current) return;
@@ -188,11 +236,60 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
     try {
       await fetch("/api/terminal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "input", sessionId: sessionId.current, input: data }),
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ action: "input", sessionId: sessionId.current, data, rawInput: true }),
       });
     } catch {}
   };
+
+  const pollSessionOutput = useCallback((id: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch("/api/terminal", {
+          method: "POST",
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({ action: "output", sessionId: id }),
+        });
+        const data = await readJsonResponse(res);
+        const chunks = Array.isArray(data.output) ? data.output : data.output ? [data.output] : [];
+
+        if (chunks.length && xtermRef.current) {
+          const output = chunks.join("");
+          xtermRef.current.write(output.replace(/\n/g, "\r\n"));
+          onOutputLog?.(output);
+          const url = extractPreviewUrl(output);
+          if (url) onPreviewUrlChange?.(url);
+        }
+
+        if (data.files && onFilesSync) {
+          onFilesSync(data.files);
+        }
+
+        if (!data.running) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          if (mountedRef.current) {
+            setRunning(false);
+            runningRef.current = false;
+            writePrompt();
+          }
+        }
+      } catch (err: any) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        if (xtermRef.current) {
+          xtermRef.current.writeln(`\r\n\x1b[31mTerminal error: ${err.message}\x1b[0m`);
+        }
+        if (mountedRef.current) {
+          setRunning(false);
+          runningRef.current = false;
+          writePrompt();
+        }
+      }
+    }, 450);
+  }, [onFilesSync, onOutputLog, onPreviewUrlChange, writePrompt]);
 
   const executeCommand = async (cmd: string) => {
     if (!xtermRef.current) return;
@@ -217,40 +314,26 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
     try {
       const res = await fetch("/api/terminal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
-          action: "run-command",
+          action: "start",
           command: cmd,
           sessionId: sessionId.current,
-          roomId,
           cwd: cwdRef.current,
           files,
         }),
       });
 
-      const data = await res.json();
-      const output = formatApiOutput(data);
-
-      if (output) {
-        term.write(output.replace(/\n/g, "\r\n"));
-        onOutputLog?.(output);
-        const url = extractPreviewUrl(output);
-        if (url) onPreviewUrlChange?.(url);
-      } else if (data.error) {
-        term.writeln(`\r\n\x1b[31m${data.error}\x1b[0m`);
+      const data = await readJsonResponse(res);
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Terminal request failed (${res.status})`);
       }
-
-      if (data.files && onFilesSync) {
-        onFilesSync(data.files);
-      }
+      pollSessionOutput(data.sessionId || sessionId.current);
     } catch (err: any) {
       term.writeln(`\r\n\x1b[31mError running command: ${err.message}\x1b[0m`);
-    } finally {
-      if (mountedRef.current) {
-        setRunning(false);
-        runningRef.current = false;
-        writePrompt();
-      }
+      if (mountedRef.current) setRunning(false);
+      runningRef.current = false;
+      writePrompt();
     }
   };
 
@@ -267,46 +350,38 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
     term.writeln(`\r\n\x1b[1;37mRunning ${activeFileName}...\x1b[0m`);
 
     try {
-      const res = await fetch("/api/run-code", {
+      const res = await fetch("/api/terminal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
+          action: "start",
           code: codeRef.current,
           language,
-          fileName: activeFileName,
-          roomId,
+          activeFileName,
+          sessionId: sessionId.current,
           files,
           cwd: targetCwd,
         }),
       });
 
-      const data = await res.json();
-      const output = formatApiOutput(data);
-
-      if (output) {
-        term.write(output.replace(/\n/g, "\r\n"));
-        onOutputLog?.(output);
-        const url = extractPreviewUrl(output);
-        if (url) onPreviewUrlChange?.(url);
-      } else if (data.error) {
-        term.writeln(`\x1b[31m${data.error}\x1b[0m`);
+      const data = await readJsonResponse(res);
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Terminal request failed (${res.status})`);
       }
+      pollSessionOutput(data.sessionId || sessionId.current);
     } catch (err: any) {
       term.writeln(`\x1b[31mExecution failed: ${err.message}\x1b[0m`);
-    } finally {
-      if (mountedRef.current) {
-        setRunning(false);
-        runningRef.current = false;
-        writePrompt();
-      }
+      if (mountedRef.current) setRunning(false);
+      runningRef.current = false;
+      writePrompt();
     }
-  }, [activeFileName, codeRef, files, language, onOutputLog, onPreviewUrlChange, roomId, writePrompt]);
+  }, [activeFileName, codeRef, files, language, pollSessionOutput, writePrompt]);
 
   const stopCode = async () => {
     try {
       await fetch("/api/terminal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ action: "stop", sessionId: sessionId.current }),
       });
     } catch {}
@@ -349,7 +424,29 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
           <span className="text-[11px] font-bold text-white uppercase tracking-wider">Terminal</span>
           <span className="text-[11px] text-gray-400 font-mono">{activeFileName}</span>
         </div>
-        <div className="flex gap-1.5 items-center">
+        <div className="flex gap-1.5 items-center relative">
+          <div className="relative" data-scaffold-dropdown>
+            <button
+              onClick={() => setScaffoldOpen(!scaffoldOpen)}
+              title="Quick scaffold project"
+              className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/20 border border-purple-500/40 rounded text-purple-300 cursor-pointer text-[11px] font-bold hover:bg-purple-500/30 transition-colors"
+            >
+              <Zap size={11} /> Scaffold <ChevronDown size={10} />
+            </button>
+            {scaffoldOpen && (
+              <div className="absolute top-full right-0 mt-1 bg-[#1a1a2e] border border-[#333] rounded-lg shadow-2xl z-50 min-w-[220px] overflow-hidden">
+                {SCAFFOLD_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.label}
+                    onClick={() => executeScaffold(tpl.cmd)}
+                    className="w-full text-left px-3 py-2 text-[11px] text-gray-200 hover:bg-purple-500/20 cursor-pointer border-none bg-transparent transition-colors flex items-center gap-2"
+                  >
+                    <Zap size={10} className="text-purple-400 shrink-0" /> {tpl.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {running ? (
             <button onClick={stopCode} title="Stop" className="flex items-center gap-1 px-2.5 py-0.5 bg-red-500/20 border border-red-500/40 rounded text-red-400 cursor-pointer text-[11px] font-bold">
               <Square size={11}/> Stop

@@ -55,8 +55,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let release: (() => void) | null = null;
   try {
     const { user } = await getAuthenticatedUser(req);
+    if (!user) {
+      return NextResponse.json({ stdout: "", stderr: "Unauthorized", exitCode: 1 }, { status: 401 });
+    }
+
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-    const userId = user?.id || clientIp;
+    const userId = user.id || clientIp;
 
     const limit = checkRateLimit(`run-code:${userId}`, RUN_CODE_LIMIT.max, RUN_CODE_LIMIT.windowMs);
     if (!limit.allowed) {

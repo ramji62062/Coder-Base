@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_WHITEBOARD_MODEL || "openai/gpt-oss-120b";
 
 const SYSTEM_PROMPT = `You are a whiteboard diagram generator. You ONLY output JSON arrays. No code, no explanations, no text outside the JSON.
 
 OUTPUT FORMAT: A JSON array of objects. Each object represents a shape on a whiteboard.
 
 SHAPE TYPES:
-1. Rectangle with text: {"type":"rect","x":100,"y":100,"w":160,"h":80,"color":"#3B82F6","text":"Server Name"}
+1. Rectangle with text: {"type":"rect","x":100,"y":100,"w":160,"h":80,"color":"#ffffff","text":"Server Name"}
 2. Circle with text: {"type":"circle","x":300,"y":100,"w":100,"h":100,"color":"#10B981","text":"Database"}
 3. Arrow: {"type":"arrow","points":[{"x":260,"y":140},{"x":300,"y":140}],"color":"#ffffff"}
 4. Title text: {"type":"text","x":400,"y":30,"text":"Architecture Title","color":"#ffffff","fontSize":24}
@@ -15,7 +16,7 @@ SHAPE TYPES:
 RULES:
 - Output ONLY the JSON array, nothing else
 - Every shape MUST have a "text" field with a label
-- Colors: "#3B82F6" (blue), "#10B981" (green), "#F59E0B" (amber), "#EF4444" (red), "#7C3AED" (purple), "#ffffff" (white)
+- Colors: "#ffffff" (white), "#10B981" (green), "#F59E0B" (amber), "#EF4444" (red), "#ffffff" (white), "#ffffff" (white)
 - Space shapes so they don't overlap (x: 80-800, y: 30-500)
 - Add arrows to connect related shapes
 - Include a title at the top
@@ -24,8 +25,8 @@ RULES:
 EXAMPLE OUTPUT:
 [
   {"type":"text","x":400,"y":30,"text":"System Architecture","color":"#ffffff","fontSize":24},
-  {"type":"rect","x":100,"y":100,"w":160,"h":80,"color":"#3B82F6","text":"Frontend"},
-  {"type":"rect","x":350,"y":100,"w":160,"h":80,"color":"#7C3AED","text":"API Gateway"},
+  {"type":"rect","x":100,"y":100,"w":160,"h":80,"color":"#ffffff","text":"Frontend"},
+  {"type":"rect","x":350,"y":100,"w":160,"h":80,"color":"#ffffff","text":"API Gateway"},
   {"type":"rect","x":600,"y":100,"w":160,"h":80,"color":"#10B981","text":"Database"},
   {"type":"arrow","points":[{"x":260,"y":140},{"x":350,"y":140}],"color":"#ffffff"},
   {"type":"arrow","points":[{"x":510,"y":140},{"x":600,"y":140}],"color":"#ffffff"}
@@ -50,7 +51,7 @@ Return ONLY a JSON array of shapes. Every rectangle and circle MUST have a "text
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: GROQ_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userMessage },

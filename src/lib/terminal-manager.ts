@@ -45,7 +45,7 @@ class TerminalManager {
   }
 
   public assertDockerReady() {
-    return false;
+    return true;
   }
 
   private pushOutput(session: Session, data: string) {
@@ -129,9 +129,10 @@ class TerminalManager {
       : ["-lc", fullCommand];
 
     try {
+      const isNpmCommand = /^\s*(npm|yarn|pnpm|npx|bun)\b/.test(fullCommand.trim());
       const proc = spawn(shell, shellArgs, {
         cwd,
-        env: { ...process.env, FORCE_COLOR: "1", BROWSER: "none", CI: "1" },
+        env: { ...process.env, FORCE_COLOR: "1", BROWSER: "none", ...(isNpmCommand ? {} : { CI: "1" }) },
         stdio: ["pipe", "pipe", "pipe"],
         detached: false,
       });

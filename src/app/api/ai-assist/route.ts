@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const PRIMARY_MODEL = "llama-3.3-70b-versatile";
-const FALLBACK_MODEL = "llama-3.1-8b-instant";
+const PRIMARY_MODEL = process.env.GROQ_PRIMARY_MODEL || "openai/gpt-oss-120b";
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-20b";
 const MAX_RETRIES = 2;
 
 async function callGroq(

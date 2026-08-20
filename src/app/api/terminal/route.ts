@@ -69,7 +69,7 @@ function getRunnableFile(language: string, code: string, preferredFileName?: str
     const className = classMatch ? classMatch[1] : "Main";
     const fileName = preferredFileName || `${className}.java`;
     const mainClass = runDir ? findJavaMainClass(runDir, className) : className;
-    return { fileName, execCmd: `javac -encoding UTF-8 *.java && java ${quoteShell(mainClass)}` };
+    return { fileName, execCmd: `javac -encoding UTF-8 *.java && java ${quoteShell(mainClass)}`, pistonFallback: !hasExecutable("javac") };
   }
 
   const name = preferredFileName || "";
@@ -79,37 +79,71 @@ function getRunnableFile(language: string, code: string, preferredFileName?: str
     ruby: "main.rb", kotlin: "Main.kt", swift: "main.swift", scala: "Main.scala",
     perl: "main.pl", r: "main.r", lua: "main.lua", dart: "main.dart",
     shell: "main.sh", bash: "main.sh", html: "index.html", css: "style.css",
-    json: "main.json", markdown: "README.md",
+    json: "main.json", markdown: "README.md", haskell: "main.hs", elixir: "main.ex",
+    clojure: "main.clj", erlang: "main.erl", nim: "main.nim", pascal: "main.pas",
+    fortran: "main.f90", ocaml: "main.ml", zig: "main.zig", d: "main.d",
+    julia: "main.jl", lisp: "main.lisp", scheme: "main.scm", assembly: "main.asm",
+    asm: "main.asm", nasm: "main.asm", prolog: "main.pl", cobol: "main.cob",
+    crystal: "main.cr", elm: "main.elm", groovy: "Main.groovy", racket: "main.rkt",
+    tcl: "main.tcl", fsharp: "Main.fs",
   };
   const fileName = name || fallback[normalized] || "main.js";
   const q = quoteShell(fileName);
-  const runners: Record<string, string> = {
-    javascript: `node ${q}`,
-    typescript: hasExecutable("tsx") ? `tsx ${q}` : `node ${q}`,
-    python: `python3 ${q}`,
-    cpp: `g++ ${q} -o main && ./main`,
-    c: `gcc ${q} -o main && ./main`,
-    csharp: `dotnet-script ${q}`,
-    go: `go run ${q}`,
-    rust: `rustc ${q} -o main && ./main`,
-    php: `php ${q}`,
-    ruby: `ruby ${q}`,
-    kotlin: `kotlinc ${q} -include-runtime -d main.jar && java -jar main.jar`,
-    swift: `swift ${q}`,
-    scala: `scala ${q}`,
-    perl: `perl ${q}`,
-    r: `Rscript ${q}`,
-    lua: `lua ${q}`,
-    dart: `dart ${q}`,
-    shell: `sh ${q}`,
-    bash: `bash ${q}`,
-    html: `printf 'HTML saved to ${fileName}. Use Preview or download/open it in a browser.\\n' && wc -c ${q}`,
-    css: `printf 'CSS saved to ${fileName}. Attach it to an HTML file to preview styles.\\n' && wc -c ${q}`,
-    json: `node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log('Valid JSON')" ${q}`,
-    markdown: `printf 'Markdown saved to ${fileName}.\\n' && wc -l ${q}`,
+  const runners: Record<string, { execCmd: string; bin?: string }> = {
+    javascript: { execCmd: `node ${q}`, bin: "node" },
+    typescript: hasExecutable("tsx") ? { execCmd: `tsx ${q}`, bin: "tsx" } : { execCmd: `node ${q}`, bin: "node" },
+    python: { execCmd: `python3 ${q}`, bin: "python3" },
+    cpp: { execCmd: `g++ ${q} -o main && ./main`, bin: "g++" },
+    c: { execCmd: `gcc ${q} -o main && ./main`, bin: "gcc" },
+    csharp: { execCmd: `dotnet-script ${q}`, bin: "dotnet-script" },
+    go: { execCmd: `go run ${q}`, bin: "go" },
+    rust: { execCmd: `rustc ${q} -o main && ./main`, bin: "rustc" },
+    php: { execCmd: `php ${q}`, bin: "php" },
+    ruby: { execCmd: `ruby ${q}`, bin: "ruby" },
+    kotlin: { execCmd: `kotlinc ${q} -include-runtime -d main.jar && java -jar main.jar`, bin: "kotlinc" },
+    swift: { execCmd: `swift ${q}`, bin: "swift" },
+    scala: { execCmd: `scala ${q}`, bin: "scala" },
+    perl: { execCmd: `perl ${q}`, bin: "perl" },
+    r: { execCmd: `Rscript ${q}`, bin: "Rscript" },
+    lua: { execCmd: `lua ${q}`, bin: "lua" },
+    dart: { execCmd: `dart ${q}`, bin: "dart" },
+    shell: { execCmd: `sh ${q}`, bin: "sh" },
+    bash: { execCmd: `bash ${q}`, bin: "bash" },
+    html: { execCmd: `printf 'HTML saved to ${fileName}. Use Preview or download/open it in a browser.\\n' && wc -c ${q}` },
+    css: { execCmd: `printf 'CSS saved to ${fileName}. Attach it to an HTML file to preview styles.\\n' && wc -c ${q}` },
+    json: { execCmd: `node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); console.log('Valid JSON')" ${q}`, bin: "node" },
+    markdown: { execCmd: `printf 'Markdown saved to ${fileName}.\\n' && wc -l ${q}` },
+    haskell: { execCmd: `runghc ${q}`, bin: "runghc" },
+    elixir: { execCmd: `elixir ${q}`, bin: "elixir" },
+    clojure: { execCmd: `clojure ${q}`, bin: "clojure" },
+    erlang: { execCmd: `escript ${q}`, bin: "escript" },
+    nim: { execCmd: `nim compile --run ${q}`, bin: "nim" },
+    pascal: { execCmd: `fpc ${q} && ./main`, bin: "fpc" },
+    fortran: { execCmd: `gfortran ${q} -o main && ./main`, bin: "gfortran" },
+    ocaml: { execCmd: `ocaml ${q}`, bin: "ocaml" },
+    zig: { execCmd: `zig run ${q}`, bin: "zig" },
+    d: { execCmd: `dmd ${q} -of=main && ./main`, bin: "dmd" },
+    julia: { execCmd: `julia ${q}`, bin: "julia" },
+    lisp: { execCmd: `sbcl --script ${q}`, bin: "sbcl" },
+    scheme: { execCmd: `guile ${q}`, bin: "guile" },
+    assembly: { execCmd: `nasm -felf64 ${q} -o main.o && ld main.o -o main && ./main`, bin: "nasm" },
+    asm: { execCmd: `nasm -felf64 ${q} -o main.o && ld main.o -o main && ./main`, bin: "nasm" },
+    nasm: { execCmd: `nasm -felf64 ${q} -o main.o && ld main.o -o main && ./main`, bin: "nasm" },
+    prolog: { execCmd: `swipl -q -f ${q}`, bin: "swipl" },
+    cobol: { execCmd: `cobc -x ${q} -o main && ./main`, bin: "cobc" },
+    crystal: { execCmd: `crystal run ${q}`, bin: "crystal" },
+    elm: { execCmd: `elm make ${q}`, bin: "elm" },
+    groovy: { execCmd: `groovy ${q}`, bin: "groovy" },
+    racket: { execCmd: `racket ${q}`, bin: "racket" },
+    tcl: { execCmd: `tclsh ${q}`, bin: "tclsh" },
+    fsharp: { execCmd: `dotnet fsi ${q}`, bin: "dotnet" },
   };
 
-  return { fileName, execCmd: runners[normalized] || runners.javascript };
+  const runner = runners[normalized];
+  if (!runner) {
+    return { fileName, execCmd: "", pistonFallback: true };
+  }
+  return { fileName, execCmd: runner.execCmd, pistonFallback: !!runner.bin && !hasExecutable(runner.bin) };
 }
 
 function collectWorkspaceFiles(root: string) {
@@ -152,8 +186,12 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const { user } = await getAuthenticatedUser(req);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-    const userId = user?.id || clientIp;
+    const userId = user.id || clientIp;
 
     const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false } = await req.json();
 
@@ -202,6 +240,10 @@ export async function POST(req: NextRequest) {
         targetFileName = runnable.fileName;
         writeFileSync(join(tmpDir, targetFileName), code, "utf8");
         runnable = getRunnableFile(effectiveLang, code, preferredFileName, tmpDir);
+        if (runnable.pistonFallback) {
+          terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
+          return NextResponse.json({ sessionId: runId });
+        }
         execCmd = runnable.execCmd;
       }
 
@@ -215,8 +257,12 @@ export async function POST(req: NextRequest) {
 
       const allowNetwork = typeof execCmd === "string" && /^\s*(npm|yarn|pnpm|npx)\b/.test(execCmd.trim());
 
-      if (typeof code === "string" && language && !terminalManager.assertDockerReady()) {
-        terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
+      if (!terminalManager.assertDockerReady()) {
+        if (typeof code === "string" && language) {
+          terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
+        } else {
+          terminalManager.startPistonSession(runId, "bash", execCmd, tmpDir, workspaceRoot);
+        }
       } else {
         try {
           terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot, allowNetwork);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { BookOpen, Download, Send, Pin, PinOff, Trash2, Plus, Eye, Edit3, Copy, Check, Globe } from "lucide-react";
+import { BookOpen, Download, Send, Pin, PinOff, Trash2, Plus, Eye, Edit3, Copy, Check, Globe, Image, Bold, Italic, Underline, Strikethrough, Code, Type, List, ListOrdered, Quote, Minimize2, Maximize2, RotateCcw, Scissors, Copy as CopyIcon, Edit3 as EditIcon, Trash2 as TrashIcon, Link as LinkIcon, Heading1, Heading2, Heading3, AlignLeft, AlignCenter, AlignRight, Undo2, Redo2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type Note = {
@@ -39,6 +39,17 @@ type SharedNote = {
   createdAt: number;
 };
 
+type ImageBlock = {
+  id: string;
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  rotation: number;
+};
+
 interface TeacherNotesProps {
   roomId: string;
   currentUserId: string;
@@ -57,9 +68,19 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState("");
+  const [selectedImage, setSelectedImage] = useState<ImageBlock | null>(null);
+  const [images, setImages] = useState<ImageBlock[]>([]);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkText, setLinkText] = useState("");
 
   const notesRef = useRef<Note[]>([]);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     notesRef.current = notes;
@@ -291,18 +312,269 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
   const activeColor = getNoteColor(activePrivate?.color);
 
   function renderMarkdown(md: string, accentColor = "#fff") {
-    return md
+    let result = md;
+    result = result.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    result = result
       .replace(/^### (.*$)/gim, `<h3 style="font-size:15px;font-weight:700;margin:12px 0 6px;color:${accentColor};">$1</h3>`)
       .replace(/^## (.*$)/gim, `<h2 style="font-size:17px;font-weight:800;margin:16px 0 8px;color:${accentColor};">$1</h2>`)
       .replace(/^# (.*$)/gim, `<h1 style="font-size:20px;font-weight:900;margin:20px 0 10px;color:${accentColor};">$1</h1>`)
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      .replace(/~~(.*?)~~/g, "<del>$1</del>")
+      .replace(/__(.*?)__/g, "<u>$1</u>")
       .replace(/`([^`]+)`/g, '<code style="background:#222;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px;color:#fff;">$1</code>')
       .replace(/```([\s\S]*?)```/g, '<pre style="background:#111;padding:12px;border-radius:8px;overflow-x:auto;font-family:monospace;font-size:12px;color:#ccc;"><code>$1</code></pre>')
+      .replace(/\!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;margin:8px 0;" />')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#7C3AED;text-decoration:underline;">$1</a>')
+      .replace(/^> (.*$)/gim, '<blockquote style="border-left:3px solid #7C3AED;padding-left:12px;margin:12px 0;color:#aaa;font-style:italic;">$1</blockquote>')
+      .replace(/^- (.*$)/gim, '<li style="margin:4px 0;padding-left:20px;">$1</li>')
+      .replace(/^\d+\. (.*$)/gim, '<li style="margin:4px 0;padding-left:20px;">$1</li>')
+      .replace(/<div align='left'>(.*?)<\/div>/g, '<div style="text-align:left;">$1</div>')
+      .replace(/<div align='center'>(.*?)<\/div>/g, '<div style="text-align:center;">$1</div>')
+      .replace(/<div align='right'>(.*?)<\/div>/g, '<div style="text-align:right;">$1</div>')
       .replace(/\n/g, "<br/>");
+    return result;
   }
 
+  // 18 Format Buttons
+  const formatButtons = [
+    { id: "h1", icon: <Heading1 size={14} />, title: "Heading 1", shortcut: "Ctrl+1" },
+    { id: "h2", icon: <Heading2 size={14} />, title: "Heading 2", shortcut: "Ctrl+2" },
+    { id: "h3", icon: <Heading3 size={14} />, title: "Heading 3", shortcut: "Ctrl+3" },
+    { id: "bold", icon: <Bold size={14} />, title: "Bold", shortcut: "Ctrl+B" },
+    { id: "italic", icon: <Italic size={14} />, title: "Italic", shortcut: "Ctrl+I" },
+    { id: "underline", icon: <Underline size={14} />, title: "Underline", shortcut: "Ctrl+U" },
+    { id: "strikethrough", icon: <Strikethrough size={14} />, title: "Strikethrough" },
+    { id: "code", icon: <Code size={14} />, title: "Inline Code" },
+    { id: "codeblock", icon: <Type size={14} />, title: "Code Block" },
+    { id: "quote", icon: <Quote size={14} />, title: "Quote" },
+    { id: "bullet", icon: <List size={14} />, title: "Bullet List" },
+    { id: "numbered", icon: <ListOrdered size={14} />, title: "Numbered List" },
+    { id: "link", icon: <LinkIcon size={14} />, title: "Insert Link", shortcut: "Ctrl+K" },
+    { id: "image", icon: <Image size={14} />, title: "Insert Image" },
+    { id: "align-left", icon: <AlignLeft size={14} />, title: "Align Left" },
+    { id: "align-center", icon: <AlignCenter size={14} />, title: "Align Center" },
+    { id: "align-right", icon: <AlignRight size={14} />, title: "Align Right" },
+    { id: "undo", icon: <Undo2 size={14} />, title: "Undo", shortcut: "Ctrl+Z" },
+    { id: "redo", icon: <Redo2 size={14} />, title: "Redo", shortcut: "Ctrl+Y" },
+  ];
+
+  const pushHistory = (content: string) => {
+    setHistory((prev) => {
+      const next = prev.slice(0, historyIndex + 1);
+      next.push(content);
+      return next.slice(-50);
+    });
+    setHistoryIndex((prev) => Math.min(prev + 1, 49));
+  };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setEditContent(history[newIndex]);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setEditContent(history[newIndex]);
+    }
+  };
+
+  const applyFormat = (format: string, value?: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = editContent;
+    const selectedText = text.substring(start, end);
+    
+    let newText = text;
+    let newCursorPos = start;
+    
+    switch (format) {
+      case "bold":
+        newText = text.substring(0, start) + "**" + selectedText + "**" + text.substring(end);
+        newCursorPos = start + 2 + selectedText.length + 2;
+        break;
+      case "italic":
+        newText = text.substring(0, start) + "*" + selectedText + "*" + text.substring(end);
+        newCursorPos = start + 1 + selectedText.length + 1;
+        break;
+      case "underline":
+        newText = text.substring(0, start) + "<u>" + selectedText + "</u>" + text.substring(end);
+        newCursorPos = start + 3 + selectedText.length + 4;
+        break;
+      case "strikethrough":
+        newText = text.substring(0, start) + "~~" + selectedText + "~~" + text.substring(end);
+        newCursorPos = start + 2 + selectedText.length + 2;
+        break;
+      case "code":
+        newText = text.substring(0, start) + "`" + selectedText + "`" + text.substring(end);
+        newCursorPos = start + 1 + selectedText.length + 1;
+        break;
+      case "codeblock":
+        newText = text.substring(0, start) + "```\n" + selectedText + "\n```" + text.substring(end);
+        newCursorPos = start + 4 + selectedText.length + 4;
+        break;
+      case "h1":
+        newText = text.substring(0, start) + "# " + (selectedText || "Heading 1") + text.substring(end);
+        break;
+      case "h2":
+        newText = text.substring(0, start) + "## " + (selectedText || "Heading 2") + text.substring(end);
+        break;
+      case "h3":
+        newText = text.substring(0, start) + "### " + (selectedText || "Heading 3") + text.substring(end);
+        break;
+      case "quote":
+        newText = text.substring(0, start) + "> " + selectedText.replace(/\n/g, "\n> ") + text.substring(end);
+        break;
+      case "bullet":
+        newText = text.substring(0, start) + "- " + selectedText.replace(/\n/g, "\n- ") + text.substring(end);
+        break;
+      case "numbered":
+        newText = text.substring(0, start) + "1. " + selectedText.replace(/\n/g, "\n2. ") + text.substring(end);
+        break;
+      case "link":
+        if (value) {
+          newText = text.substring(0, start) + "[" + (selectedText || linkText) + "](" + value + ")" + text.substring(end);
+        }
+        break;
+      case "image":
+        if (value) {
+          newText = text.substring(0, start) + "![" + (selectedText || "Image") + "](" + value + ")" + text.substring(end);
+        }
+        break;
+      case "align-left":
+      case "align-center":
+      case "align-right":
+        const alignMap = { "align-left": "<div align='left'>", "align-center": "<div align='center'>", "align-right": "<div align='right'>" };
+        newText = text.substring(0, start) + alignMap[format as keyof typeof alignMap] + selectedText + "</div>" + text.substring(end);
+        break;
+    }
+    
+    setEditContent(newText);
+    pushHistory(newText);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  };
+
+  const insertImageIntoNote = (src: string, alt = "Image") => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? editContent.length;
+    const end = textarea?.selectionEnd ?? editContent.length;
+    const selectedText = editContent.substring(start, end);
+    const imageAlt = selectedText || alt || "Image";
+    const imageId = Date.now().toString();
+    const placeholder = `[Image: ${imageAlt}]`;
+    const newText = editContent.substring(0, start) + placeholder + editContent.substring(end);
+    const newImage: ImageBlock = {
+      id: imageId,
+      src,
+      alt: imageAlt,
+      width: 300,
+      height: 200,
+      x: 100,
+      y: 100,
+      rotation: 0,
+    };
+
+    setImages((prev) => [...prev, newImage]);
+    setSelectedImage(newImage);
+    setEditContent(newText);
+    pushHistory(newText);
+    setShowImageModal(false);
+    setTimeout(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + placeholder.length, start + placeholder.length);
+    }, 0);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      insertImageIntoNote(dataUrl, file.name);
+      e.target.value = "";
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePasteImage = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData.items;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result as string;
+            insertImageIntoNote(dataUrl, "Pasted image");
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  const handleImageAction = (action: string, image: ImageBlock) => {
+    switch (action) {
+      case "minimize":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 50, height: 50 } : img)));
+        break;
+      case "maximize":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 600, height: 400 } : img)));
+        break;
+      case "copy":
+        navigator.clipboard.writeText(`![${image.alt}](${image.src})`);
+        break;
+      case "rotate":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, rotation: (img.rotation + 90) % 360 } : img)));
+        break;
+      case "edit":
+        setSelectedImage(image);
+        break;
+      case "delete":
+        setImages((prev) => prev.filter((img) => img.id !== image.id));
+        const newContent = editContent.replace(`![${image.alt}](${image.src})`, "");
+        setEditContent(newContent);
+        pushHistory(newContent);
+        setSelectedImage(null);
+        break;
+    }
+  };
+
+  const handleLinkInsert = () => {
+    if (linkUrl) {
+      applyFormat("link", linkUrl);
+      setShowLinkModal(false);
+      setLinkUrl("");
+      setLinkText("");
+    }
+  };
+
+  const editorPlaceholder = [
+    `# ${editTitle}`,
+    "",
+    "Start writing your notes here...",
+    "",
+    "Toolbar: 18 formatting options including headings, bold, italic, underline, strikethrough, code, lists, quotes, links, images, alignment, undo/redo",
+    "",
+    "Markdown supported: # ## ### **bold** *italic* <u>underline</u> ~~strike~~ `code` ```code``` > quote - bullet 1. numbered [link](url) ![img](url)",
+  ].join("\n");
+
   return (
+    <>
     <div className="flex h-full bg-ct-dark-black text-gray-200 font-inter">
       {/* Sidebar List */}
       <div className="w-[200px] border-r border-[#222222] flex flex-col bg-ct-dark-black">
@@ -378,88 +650,116 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
       <div className="flex-1 flex flex-col">
         {hasActive ? (
           <>
-            {/* Toolbar */}
-            <div
-              className="p-[8px_12px] border-b border-[#222222] flex items-center gap-1.5 flex-wrap"
-              style={{ backgroundColor: activeColor.bg }}
-            >
-              {isActiveShared ? (
-                <div className="flex-1 text-sm font-bold text-white flex items-center gap-1.5">
-                  <Globe size={14} className="text-green-400" />
-                  <span>{editTitle}</span>
-                  <span className="text-[10px] text-gray-500 font-normal">Shared by {activeShared?.publisherName}</span>
-                </div>
-              ) : (
-                <input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onBlur={saveActiveNote}
-                  placeholder="Note title..."
-                  className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm font-bold text-white"
-                />
-              )}
+            {/* Top Toolbar - Always Visible */}
+            <div className="p-2 border-b border-[#222222] flex items-center gap-2 flex-wrap bg-ct-dark-black sticky top-0 z-10">
+              <div className="flex gap-1 items-center mr-4">
+                {formatButtons.map((btn) => (
+                  <button
+                    key={btn.id}
+                    onClick={() => {
+                      if (btn.id === "undo") undo();
+                      else if (btn.id === "redo") redo();
+                      else if (btn.id === "link") setShowLinkModal(true);
+                      else if (btn.id === "image") setShowImageModal(true);
+                      else applyFormat(btn.id);
+                    }}
+                    title={`${btn.title}${btn.shortcut ? ` (${btn.shortcut})` : ""}`}
+                    className={`p-2 rounded-md border border-transparent cursor-pointer transition-colors flex items-center justify-center ${
+                      ["bold", "italic", "underline", "strikethrough"].includes(btn.id) ? "bg-white/5" : "bg-transparent"
+                    } hover:bg-white/10 hover:text-white text-gray-400`}
+                    disabled={isActiveShared}
+                  >
+                    {btn.icon}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex-1 min-w-[150px] flex items-center gap-2">
+                {isActiveShared ? (
+                  <div className="flex-1 text-sm font-bold text-white flex items-center gap-1.5">
+                    <Globe size={14} className="text-green-400" />
+                    <span>{editTitle}</span>
+                    <span className="text-[10px] text-gray-500 font-normal">Shared by {activeShared?.publisherName}</span>
+                  </div>
+                ) : (
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onBlur={saveActiveNote}
+                    placeholder="Note title..."
+                    className="flex-1 min-w-[120px] bg-transparent border-none outline-none text-sm font-bold text-white"
+                  />
+                )}
+              </div>
+
               <div className="flex gap-1 items-center">
                 {isActiveShared ? (
                   <>
                     <button onClick={copyToClipboard} title="Copy to Clipboard"
-                      className="px-2 py-1 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
+                      className="px-3 py-1.5 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
                       {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
                     </button>
                     <button onClick={downloadNote} title="Download Markdown"
-                      className="px-2 py-1 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
+                      className="px-3 py-1.5 border border-[#333] rounded-md bg-transparent text-gray-300 cursor-pointer text-xs flex items-center gap-1 hover:text-white">
                       <Download size={12} /> Save
                     </button>
                   </>
                 ) : (
                   <>
-                    {!isActiveShared && activePrivate && (
-                      <div className="flex items-center gap-1 mr-1">
-                        {NOTE_COLORS.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() => setNoteColor(activePrivate.id, c.id)}
-                            title={c.label}
-                            className={`w-4 h-4 rounded-full border-2 transition-transform hover:scale-110 ${
-                              activePrivate.color === c.id || (!activePrivate.color && c.id === "default")
-                                ? "border-white scale-110"
-                                : "border-transparent"
-                            }`}
-                            style={{ backgroundColor: c.border }}
-                          />
-                        ))}
-                      </div>
-                    )}
                     <button onClick={() => setPreview((p) => !p)} title={preview ? "Edit" : "Preview"}
-                      className={`px-2 py-1 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                      className={`px-3 py-1.5 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
                         preview ? "bg-white/20 text-white" : "bg-transparent text-gray-400 hover:text-white"
                       }`}>
                       {preview ? <Edit3 size={12} /> : <Eye size={12} />} {preview ? "Edit" : "Preview"}
                     </button>
                     <button onClick={() => activePrivate && togglePin(activePrivate.id)} title="Pin" className="bg-transparent border-none p-1 cursor-pointer">
-                      {activePrivate?.pinned
-                        ? <PinOff size={14} className="text-white" />
-                        : <Pin size={14} className="text-gray-500 hover:text-white" />}
+                      {activePrivate?.pinned ? <PinOff size={14} className="text-white" /> : <Pin size={14} className="text-gray-500 hover:text-white" />}
                     </button>
                     <button onClick={downloadNote} title="Download Markdown"
-                      className="p-[4px_6px] border border-[#333] rounded-md bg-transparent text-gray-400 cursor-pointer hover:text-white">
-                      <Download size={12} />
+                      className="p-2 border border-[#333] rounded-md bg-transparent text-gray-400 cursor-pointer hover:text-white">
+                      <Download size={14} />
                     </button>
                     {(isTeacher || activePrivate?.published) && activePrivate && (
                       <button onClick={() => togglePublish(activePrivate.id)} title="Publish to classroom"
-                        className={`px-2 py-1 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
+                        className={`px-3 py-1.5 border border-[#333] rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors ${
                           activePrivate.published ? "bg-green-500/20 text-green-400 border-green-500/40" : "bg-transparent text-gray-400 hover:text-white"
                         }`}>
                         <Send size={12} /> {activePrivate.published ? "Shared" : "Share"}
                       </button>
                     )}
                     <button onClick={() => activePrivate && deleteNote(activePrivate.id)} title="Delete"
-                      className="p-[4px_6px] border border-[#333] rounded-md bg-transparent text-red-400 cursor-pointer hover:bg-red-500/20">
-                      <Trash2 size={12} />
+                      className="p-2 border border-[#333] rounded-md bg-transparent text-red-400 cursor-pointer hover:bg-red-500/20">
+                      <Trash2 size={14} />
                     </button>
                   </>
                 )}
               </div>
             </div>
+
+            {/* Image Controls Overlay */}
+            {selectedImage && !preview && (
+              <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                <div className="bg-ct-dark-black border border-white/20 rounded-xl p-4 w-full max-w-md flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-white">Image Controls</h3>
+                    <button onClick={() => setSelectedImage(null)} className="text-gray-500 hover:text-white">✕</button>
+                  </div>
+                  <img 
+                    src={selectedImage.src} 
+                    alt={selectedImage.alt} 
+                    className="max-w-full max-h-64 mx-auto rounded-lg border border-white/10"
+                    style={{ transform: `rotate(${selectedImage.rotation}deg)` }}
+                  />
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    <button onClick={() => handleImageAction("minimize", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20">Minimize</button>
+                    <button onClick={() => handleImageAction("maximize", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20">Maximize</button>
+                    <button onClick={() => handleImageAction("copy", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20"><CopyIcon size={12} className="inline" /> Copy</button>
+                    <button onClick={() => handleImageAction("rotate", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20"><RotateCcw size={12} className="inline" /> Rotate</button>
+                    <button onClick={() => handleImageAction("delete", selectedImage)} className="px-3 py-1.5 bg-red-500/20 border border-red-500/40 rounded text-red-400 text-xs hover:bg-red-500/30"><TrashIcon size={12} className="inline" /> Delete</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Content */}
             <div className="flex-1 overflow-auto" style={{ backgroundColor: activeColor.bg }}>
@@ -468,15 +768,33 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
                   className="p-5 text-sm leading-relaxed text-gray-300"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(editContent, activeColor.accent) }}
                 />
-              ) : (
+) : (
+                <>
                 <textarea
+                  ref={textareaRef}
                   value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
+                  onChange={(e) => {
+                    setEditContent(e.target.value);
+                    pushHistory(e.target.value);
+                  }}
+                  onPaste={handlePasteImage}
                   onBlur={saveActiveNote}
-                  placeholder={`# ${editTitle}\n\nStart writing your notes here...\n\nMarkdown is supported!\n- **Bold** text\n- *Italic* text\n- \`inline code\`\n- Code blocks with triple backticks`}
-                  className="w-full h-full bg-transparent border-none outline-none text-gray-300 text-sm leading-relaxed p-4 resize-none font-mono box-border"
-                  style={{ color: activeColor.accent }}
+                  placeholder={editorPlaceholder}
+                  className="w-full bg-transparent border-none outline-none text-gray-300 text-sm leading-relaxed p-4 resize-none font-mono box-border"
+                  style={{ color: activeColor.accent, minHeight: "120px", flex: 1 }}
                 />
+                {images.length > 0 && (
+                  <div className="flex flex-wrap gap-2 p-3 border-t border-[#222]">
+                    {images.map((img) => (
+                      <div key={img.id} className="relative group cursor-pointer" onClick={() => setSelectedImage(img)}>
+                        <img src={img.src} alt={img.alt}
+                          className="w-20 h-20 object-cover rounded-lg border border-white/10 hover:border-white/40 transition-colors" />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white text-center py-0.5 rounded-b-lg truncate px-1">{img.alt}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </>
               )}
             </div>
 
@@ -498,5 +816,78 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
         )}
       </div>
     </div>
+
+      {/* Image Upload Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-ct-dark-black border border-white/20 rounded-xl p-6 w-full max-w-md">
+            <h3 className="font-bold text-white mb-4">Insert Image</h3>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="w-full mb-4 p-3 bg-[#111] border border-[#333] rounded-lg text-white"
+            />
+            <div className="mb-4">
+              <label className="text-sm text-gray-400 block mb-2">Or paste image URL</label>
+              <input
+                type="url"
+                value={imageUrlInput}
+                onChange={(e) => setImageUrlInput(e.target.value)}
+                placeholder="https://example.com/image.png"
+                className="w-full p-3 bg-[#111] border border-[#333] rounded-lg text-white outline-none focus:border-white/50"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => {
+                if (imageUrlInput) {
+                  insertImageIntoNote(imageUrlInput, "Image");
+                  setImageUrlInput("");
+                }
+              }} className="flex-1 py-2 bg-white text-black font-bold rounded-lg hover:bg-gray-200">Insert</button>
+              <button onClick={() => { setShowImageModal(false); setImageUrlInput(""); }} className="flex-1 py-2 border border-[#333] text-gray-400 rounded-lg hover:bg-white/5">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link Insert Modal */}
+      {showLinkModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-ct-dark-black border border-white/20 rounded-xl p-6 w-full max-w-md">
+            <h3 className="font-bold text-white mb-4">Insert Link</h3>
+            <div className="mb-4">
+              <label className="text-sm text-gray-400 block mb-2">Link Text</label>
+              <input
+                type="text"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+                placeholder="Link text"
+                className="w-full p-3 bg-[#111] border border-[#333] rounded-lg text-white outline-none focus:border-white/50"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="text-sm text-gray-400 block mb-2">URL</label>
+              <input
+                type="url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="w-full p-3 bg-[#111] border border-[#333] rounded-lg text-white outline-none focus:border-white/50"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleLinkInsert} className="flex-1 py-2 bg-white text-black font-bold rounded-lg hover:bg-gray-200">Insert Link</button>
+              <button onClick={() => { setShowLinkModal(false); setLinkUrl(""); setLinkText(""); }} className="flex-1 py-2 border border-[#333] text-gray-400 rounded-lg hover:bg-white/5">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Status bar with history indicator */}
+      <div className="fixed bottom-4 left-4 z-20 bg-black/80 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400">
+        History: {historyIndex + 1} / {history.length} · <kbd className="px-1.5 py-0.5 bg-white/10 rounded">Ctrl+Z</kbd> Undo · <kbd className="px-1.5 py-0.5 bg-white/10 rounded">Ctrl+Y</kbd> Redo
+      </div>
+    </>
   );
 }

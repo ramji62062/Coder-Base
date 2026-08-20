@@ -166,40 +166,6 @@ async function tryJudge0Execution(language: string, code: string): Promise<Pisto
   }
 }
 
-async function tryLocalNodeExecution(language: string, code: string): Promise<PistonResult | null> {
-  const normLang = (language || "").toLowerCase();
-  if (normLang !== "javascript" && normLang !== "js" && normLang !== "typescript" && normLang !== "ts") {
-    return null;
-  }
-
-  try {
-    const { execSync } = await import("child_process");
-    const escapedCode = JSON.stringify(code);
-    const output = execSync(`node -e ${escapedCode}`, { timeout: 8000, encoding: "utf-8" });
-    return { stdout: output, stderr: "", exitCode: 0 };
-  } catch (err: any) {
-    const stderr = err.stderr || err.stdout || err.message || "Execution error";
-    return { stdout: err.stdout || "", stderr: String(stderr), exitCode: 1 };
-  }
-}
-
-async function tryLocalPythonExecution(language: string, code: string): Promise<PistonResult | null> {
-  const normLang = (language || "").toLowerCase();
-  if (normLang !== "python" && normLang !== "py" && normLang !== "python3") {
-    return null;
-  }
-
-  try {
-    const { execSync } = await import("child_process");
-    const escapedCode = JSON.stringify(code);
-    const output = execSync(`python3 -c ${escapedCode}`, { timeout: 8000, encoding: "utf-8" });
-    return { stdout: output, stderr: "", exitCode: 0 };
-  } catch (err: any) {
-    const stderr = err.stderr || err.stdout || err.message || "Execution error";
-    return { stdout: err.stdout || "", stderr: String(stderr), exitCode: 1 };
-  }
-}
-
 export async function executeWithPiston(language: string, code: string, customFileName?: string): Promise<PistonResult> {
   const normLang = resolveCodeLanguage(language, code, customFileName);
 
@@ -278,14 +244,6 @@ export async function executeWithPiston(language: string, code: string, customFi
       // try next endpoint
     }
   }
-
-  // 3. Local JS/TS evaluation fallback
-  const localNodeResult = await tryLocalNodeExecution(normLang, code);
-  if (localNodeResult) return localNodeResult;
-
-  // 4. Local Python evaluation fallback
-  const localPythonResult = await tryLocalPythonExecution(normLang, code);
-  if (localPythonResult) return localPythonResult;
 
   return {
     stdout: "",

@@ -8,7 +8,6 @@ import Whiteboard from "@/components/Whiteboard";
 import AIAssistant from "@/components/AIAssistant";
 import TeacherNotes from "@/components/TeacherNotes";
 import SessionTimer from "@/components/SessionTimer";
-import ParticipantsCallPanel from "@/components/ParticipantsCallPanel";
 import { ChevronDown, ChevronRight, Mic, MicOff, Video, VideoOff, PhoneOff, Users, GripHorizontal, Maximize2, Minus } from "lucide-react";
 
 type PresenceMember = { userId: string; name: string; avatar?: string | null };
@@ -194,15 +193,15 @@ function FloatingCallWindow({
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <div style={{
             width: 26, height: 26, borderRadius: "50%",
-            background: "linear-gradient(135deg,#7C3AED,#5b21b6)",
+            background: "linear-gradient(135deg,#ffffff,#cccccc)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontSize: 10, fontWeight: 700,
+            color: "#000", fontSize: 10, fontWeight: 700,
             border: micOn ? "2px solid #22c55e" : "1px solid #444"
           }}>
             {currentUserName.slice(0, 2).toUpperCase()}
           </div>
           <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Call</span>
-          <span style={{ fontSize: 10, background: "#7C3AED33", color: "#c4b5fd", padding: "1px 6px", borderRadius: 10, display: "flex", alignItems: "center", gap: 3 }}>
+          <span style={{ fontSize: 10, background: "#ffffff33", color: "#ffffff", padding: "1px 6px", borderRadius: 10, display: "flex", alignItems: "center", gap: 3 }}>
             <Users size={10} /> {totalInCall}
           </span>
         </div>
@@ -234,8 +233,8 @@ function FloatingCallWindow({
             title="Expand call window"
             style={{
               background: "rgba(124, 58, 237, 0.2)",
-              border: "1px solid #7C3AED", borderRadius: 12, padding: "4px 8px",
-              color: "#c4b5fd", cursor: "pointer", display: "flex", alignItems: "center",
+              border: "1px solid #ffffff", borderRadius: 12, padding: "4px 8px",
+              color: "#ffffff", cursor: "pointer", display: "flex", alignItems: "center",
             }}>
             <Maximize2 size={12} />
           </button>
@@ -415,8 +414,8 @@ export default function LeftSidebar(props: LeftSidebarProps) {
   }
 
   const isParticipants = props.activePanel === "participants";
-  const showSidebar = props.activePanel !== "none";
-  const sidebarWidth = isParticipants ? 280 : 260;
+  const showSidebar = props.activePanel !== "none" && !isParticipants;
+  const sidebarWidth = 260;
   const actualWidth = showSidebar ? sidebarWidth : 0;
 
   const panelContent = (
@@ -463,28 +462,6 @@ export default function LeftSidebar(props: LeftSidebarProps) {
           />
         )}
         
-        <div className={`flex flex-col h-full ${props.isFullscreen ? "overflow-visible" : "overflow-hidden"}`}>
-          <ParticipantsCallPanel
-            members={props.members}
-            currentUserId={props.currentUserId}
-            currentUserName={props.currentUserName}
-            roomId={props.roomId}
-            micOn={props.micOn ?? false}
-            cameraOn={props.cameraOn ?? false}
-            screenOn={props.screenOn ?? false}
-            isFullscreen={props.isFullscreen}
-            onFullscreenChange={props.onFullscreenChange}
-            onMicToggle={props.onMicToggle ?? (() => {})}
-            onCameraToggle={props.onCameraToggle ?? (() => {})}
-            onScreenToggle={props.onScreenToggle ?? (() => {})}
-            isHost={props.isTeacher}
-            hostUserId={props.hostUserId}
-            onAddToast={props.onAddToast}
-            isCallJoined={props.isCallJoined ?? false}
-            onCallJoinedChange={props.onCallJoinedChange ?? (() => {})}
-          />
-        </div>
-
         {props.activePanel === "debug" && (
           <DebugPanel
             breakpoints={props.breakpoints}

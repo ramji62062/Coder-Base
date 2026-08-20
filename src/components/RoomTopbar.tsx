@@ -208,11 +208,14 @@ export default function RoomTopbar({
           <button
             onClick={onScreenToggle}
             title={screenOn ? "Stop sharing" : "Share screen"}
-            className={`w-6 h-6 rounded border-none cursor-pointer flex items-center justify-center transition-colors mr-[6px] ${
-              screenOn ? "bg-white/20 text-gray-200" : "bg-transparent text-gray-500 hover:text-gray-300"
+            className={`h-7 px-2.5 rounded-md border cursor-pointer flex items-center justify-center gap-1.5 transition-colors mr-[6px] text-[11px] font-semibold ${
+              screenOn
+                ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/40"
+                : "bg-black/60 text-black border-black/30 hover:bg-black/80 hover:text-black"
             }`}
           >
             <Monitor size={13} />
+            <span className="hidden sm:inline">{screenOn ? "Sharing" : "Share"}</span>
           </button>
 
           {/* Room code pill */}

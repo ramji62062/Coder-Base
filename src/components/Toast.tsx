@@ -19,28 +19,19 @@ function ToastItem({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: str
     return () => clearTimeout(t);
   }, [toast.id, onDismiss]);
 
-  const bg = toast.type === "error" ? "#c72a2a" : toast.type === "success" ? "#2ea043" : "#007acc";
+  const toneClass =
+    toast.type === "error"
+      ? "bg-[#c72a2a] text-white"
+      : toast.type === "success"
+        ? "bg-[#2ea043] text-white"
+        : "bg-white text-black";
 
   return (
-    <div
-      className="toast-enter"
-      style={{
-        background: bg,
-        color: "#fff",
-        padding: "8px 14px",
-        borderRadius: 4,
-        fontSize: 13,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        maxWidth: 380,
-      }}
-    >
-      <span style={{ flex: 1 }}>{toast.message}</span>
+    <div className={`toast-enter flex max-w-[380px] items-center gap-2 rounded px-3.5 py-2 text-[13px] shadow-[0_4px_16px_rgba(0,0,0,0.4)] ${toneClass}`}>
+      <span className="flex-1">{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
-        style={{ background: "none", border: "none", color: "#fff", cursor: "pointer", fontSize: 16, padding: 0, lineHeight: 1 }}
+        className={`cursor-pointer border-none bg-transparent p-0 text-base leading-none ${toast.type === "info" ? "text-black" : "text-white"}`}
       >
         ×
       </button>
@@ -51,7 +42,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: str
 export default function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   if (toasts.length === 0) return null;
   return (
-    <div style={{ position: "fixed", bottom: 40, left: 60, zIndex: 9999, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className="fixed bottom-10 left-[60px] z-[9999] flex flex-col gap-2">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
       ))}

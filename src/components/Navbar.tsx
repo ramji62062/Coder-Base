@@ -71,7 +71,7 @@ export default function Navbar() {
 
   return (
     <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8">
-      <Link href="/" className="text-xl font-extrabold tracking-tight text-[#7C3AED] sm:text-2xl">
+      <Link href="/" className="text-xl font-extrabold tracking-tight text-white sm:text-2xl">
         CodeTogether
       </Link>
 
@@ -84,13 +84,13 @@ export default function Navbar() {
           </div>
           <Link
             href="/dashboard"
-            className="rounded-lg border border-[#7C3AED]/60 px-3 py-2 text-sm text-white transition hover:border-[#7C3AED] hover:bg-[#7C3AED]/10"
+            className="rounded-lg border border-white/60 px-3 py-2 text-sm text-white transition hover:border-white hover:bg-white/10"
           >
             Dashboard
           </Link>
           <button
             onClick={handleLogout}
-            className="rounded-lg bg-[#7C3AED] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#6d28d9]"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black transition hover:bg-gray-200"
           >
             Logout
           </button>
@@ -99,13 +99,13 @@ export default function Navbar() {
         <div className="flex items-center gap-3">
           <Link
             href="/login"
-            className="rounded-lg border border-transparent px-4 py-2 text-sm text-gray-200 transition-all duration-200 hover:border-[#7C3AED] hover:text-white"
+            className="rounded-lg border border-transparent px-4 py-2 text-sm text-gray-200 transition-all duration-200 hover:border-white hover:text-white"
           >
             Login
           </Link>
           <Link
             href="/signup"
-            className="rounded-lg bg-[#7C3AED] px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#6d28d9]"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black transition-all duration-200 hover:bg-gray-200"
           >
             Sign Up
           </Link>
