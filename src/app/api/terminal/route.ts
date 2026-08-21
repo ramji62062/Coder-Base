@@ -58,7 +58,12 @@ function hasExecutable(command: string) {
     execFileSync(command, ["--version"], { stdio: "ignore", timeout: 3000 });
     return true;
   } catch {
-    return false;
+    try {
+      execFileSync("which", [command], { stdio: "ignore", timeout: 2000 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -91,8 +96,12 @@ function getRunnableFile(language: string, code: string, preferredFileName?: str
   const q = quoteShell(fileName);
   const runners: Record<string, { execCmd: string; bin?: string }> = {
     javascript: { execCmd: `node ${q}`, bin: "node" },
-    typescript: hasExecutable("tsx") ? { execCmd: `tsx ${q}`, bin: "tsx" } : { execCmd: `node ${q}`, bin: "node" },
-    python: { execCmd: `python3 ${q}`, bin: "python3" },
+    typescript: hasExecutable("tsx")
+      ? { execCmd: `tsx ${q}`, bin: "tsx" }
+      : hasExecutable("ts-node")
+      ? { execCmd: `ts-node ${q}`, bin: "ts-node" }
+      : { execCmd: `node ${q}`, bin: "node" },
+    python: hasExecutable("python3") ? { execCmd: `python3 ${q}`, bin: "python3" } : { execCmd: `python ${q}`, bin: "python" },
     cpp: { execCmd: `g++ ${q} -o main && ./main`, bin: "g++" },
     c: { execCmd: `gcc ${q} -o main && ./main`, bin: "gcc" },
     csharp: { execCmd: `dotnet-script ${q}`, bin: "dotnet-script" },
@@ -234,7 +243,18 @@ export async function POST(req: NextRequest) {
         effectiveLang = resolveCodeLanguage(language, code, preferredFileName);
         let runnable = getRunnableFile(effectiveLang, code, preferredFileName);
         targetFileName = runnable.fileName;
+        
+        // Write to tmpDir, workspaceRoot, and any relative path
         writeFileSync(join(tmpDir, targetFileName), code, "utf8");
+        writeFileSync(join(workspaceRoot, targetFileName), code, "utf8");
+        if (activeRelPath && !activeRelPath.includes("..")) {
+          const directTargetPath = resolve(workspaceRoot, activeRelPath);
+          if (directTargetPath.startsWith(workspaceRoot + sep)) {
+            mkdirSync(dirname(directTargetPath), { recursive: true });
+            writeFileSync(directTargetPath, code, "utf8");
+          }
+        }
+
         runnable = getRunnableFile(effectiveLang, code, preferredFileName, tmpDir);
         if (runnable.pistonFallback) {
           terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);

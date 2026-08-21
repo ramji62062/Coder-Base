@@ -130,9 +130,11 @@ class TerminalManager {
 
     const fullCommand = buildShellCommand(command, args || []);
     const shell = process.platform === "win32" ? "cmd" : "bash";
+    const quotedCwd = quoteShell(cwd);
+    const wrappedCmd = `cd ${quotedCwd} && ${fullCommand}`;
     const shellArgs = process.platform === "win32"
-      ? ["/d", "/s", "/c", fullCommand]
-      : ["-lc", fullCommand];
+      ? ["/d", "/s", "/c", `cd /d ${quotedCwd} && ${fullCommand}`]
+      : ["-c", wrappedCmd];
 
     try {
       const isNpmCommand = /^\s*(npm|yarn|pnpm|npx|bun)\b/.test(fullCommand.trim());
@@ -140,6 +142,7 @@ class TerminalManager {
         cwd,
         env: {
           ...process.env,
+          PWD: cwd,
           FORCE_COLOR: "1",
           TERM: "xterm-256color",
           BROWSER: "none",
@@ -172,8 +175,31 @@ class TerminalManager {
       });
 
       proc.on("error", () => {
-        this.releaseCapacity(session);
-        this.startPistonSession(sessionId, "bash", fullCommand, cwd, syncRoot);
+        // Fallback to sh if bash was missing, or Piston
+        try {
+          const fallbackProc = spawn("sh", ["-c", wrappedCmd], {
+            cwd,
+            env: { ...process.env, PWD: cwd, FORCE_COLOR: "1" },
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          session.process = fallbackProc;
+          fallbackProc.stdout?.on("data", (data) => this.pushOutput(session, data.toString()));
+          fallbackProc.stderr?.on("data", (data) => this.pushOutput(session, data.toString()));
+          fallbackProc.on("close", (code, signal) => {
+            session.running = false;
+            session.exitCode = code ?? (signal ? 1 : 0);
+            this.pushOutput(session, `\r\n\x1b[90mProcess exited with code ${session.exitCode}\x1b[0m\r\n`);
+            this.releaseCapacity(session);
+            this.scheduleCleanup(sessionId, session);
+          });
+          fallbackProc.on("error", () => {
+            this.releaseCapacity(session);
+            this.startPistonSession(sessionId, "bash", fullCommand, cwd, syncRoot);
+          });
+        } catch {
+          this.releaseCapacity(session);
+          this.startPistonSession(sessionId, "bash", fullCommand, cwd, syncRoot);
+        }
       });
 
       proc.on("close", (code, signal) => {

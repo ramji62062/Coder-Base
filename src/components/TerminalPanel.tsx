@@ -510,6 +510,8 @@ export default function TerminalPanel({
     const projectRoot = findProjectRoot(files, activeFileName);
     const targetCwd = projectRoot || rt.cwd;
 
+    const currentCode = (codeRef && codeRef.current) || files.find((f) => (f.path || f.name) === activeFileName)?.content || "";
+
     rt.running = true;
     setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, running: true } : t)));
 
@@ -521,7 +523,7 @@ export default function TerminalPanel({
         headers: await getAuthHeaders(),
         body: JSON.stringify({
           action: "start",
-          code: codeRef.current,
+          code: currentCode,
           language,
           activeFileName,
           sessionId: currentSessionId,
