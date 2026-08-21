@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { X, Trash2, Play, Square, ChevronRight, Zap, ChevronDown } from "lucide-react";
+import { X, Trash2, Play, Square, Zap, ChevronDown, Plus, Terminal as TerminalIcon } from "lucide-react";
 import type { FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 
@@ -20,6 +20,25 @@ type TerminalPanelProps = {
   onFilesSync?: (files: FileItem[]) => void;
   onPreviewUrlChange?: (url: string | null) => void;
   onOutputLog?: (text: string) => void;
+};
+
+type TerminalTab = {
+  id: string;
+  title: string;
+  sessionId: string;
+  running: boolean;
+  cwd: string;
+};
+
+type TabRuntime = {
+  term: XTerm;
+  fit: FitAddon;
+  pollTimer: NodeJS.Timeout | null;
+  inputBuffer: string;
+  history: string[];
+  historyIndex: number;
+  running: boolean;
+  cwd: string;
 };
 
 function normalizePath(path: string) {
@@ -81,18 +100,13 @@ function findProjectRoot(files: FileItem[], activeFileName: string) {
   return "";
 }
 
-function formatApiOutput(data: { stdout?: string; stderr?: string; output?: string; error?: string }) {
-  if (data.output) return data.output;
-  return [data.stdout, data.stderr].filter(Boolean).join("\n");
-}
-
 async function readJsonResponse(res: Response) {
   const text = await res.text();
   if (!text) return {};
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Server returned ${res.status} ${res.statusText}: ${text.slice(0, 140)}`);
+    return { output: text };
   }
 }
 
@@ -104,60 +118,509 @@ async function getAuthHeaders() {
   };
 }
 
-export default function TerminalPanel({ onClose, roomId, codeRef, language, activeFileName, triggerRun = 0, onWorkSave, files = [], onFilesSync, onPreviewUrlChange, onOutputLog }: TerminalPanelProps) {
+export default function TerminalPanel({
+  onClose,
+  roomId,
+  codeRef,
+  language,
+  activeFileName,
+  triggerRun = 0,
+  files = [],
+  onFilesSync,
+  onPreviewUrlChange,
+  onOutputLog,
+}: TerminalPanelProps) {
   const [height, setHeight] = useState(() => {
     if (typeof window === "undefined") return 280;
     return Math.min(360, Math.max(220, Math.round(window.innerHeight * 0.34)));
   });
-  const termRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<XTerm | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const [running, setRunning] = useState(false);
+
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => [
+    {
+      id: "tab-1",
+      title: "1: bash",
+      sessionId: `sess_${roomId}_1_${Date.now()}`,
+      running: false,
+      cwd: "",
+    },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>("tab-1");
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
-  const sessionId = useRef(`sess_${roomId}_${Date.now()}`);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
-  const inputLineRef = useRef("");
+
+  const containerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const runtimesRef = useRef<Map<string, TabRuntime>>(new Map());
+  const nextTabNumRef = useRef(2);
   const lastRunRef = useRef(0);
-  const runningRef = useRef(false);
-  const cwdRef = useRef("");
   const mountedRef = useRef(true);
 
   const SCAFFOLD_TEMPLATES = [
-    { label: "Vite + React (TS)", cmd: "npm create vite@latest my-app" },
-    { label: "Vite + React (JS)", cmd: "npm create vite@latest my-app" },
-    { label: "Vite + Vue (TS)", cmd: "npm create vite@latest my-app" },
-    { label: "Vite + Vue (JS)", cmd: "npm create vite@latest my-app" },
-    { label: "Vite + Svelte", cmd: "npm create vite@latest my-app" },
-    { label: "Next.js", cmd: "npx create-next-app@latest my-app" },
-    { label: "Empty (package.json)", cmd: "mkdir -p my-project && cd my-project && npm init -y" },
+    { label: "Vite + React (TS)", cmd: "npm create vite@latest my-app -- --template react-ts" },
+    { label: "Vite + React (JS)", cmd: "npm create vite@latest my-app -- --template react" },
+    { label: "Vite + Vue (TS)", cmd: "npm create vite@latest my-app -- --template vue-ts" },
+    { label: "Vite + Svelte", cmd: "npm create vite@latest my-app -- --template svelte-ts" },
+    { label: "Next.js App", cmd: "npx create-next-app@latest my-app --yes" },
+    { label: "Node Project (npm init)", cmd: "mkdir -p my-project && cd my-project && npm init -y" },
+    { label: "Python HTTP Server", cmd: "python3 -m http.server 8000" },
   ];
 
-  const executeScaffold = useCallback(async (cmd: string) => {
-    if (!xtermRef.current) return;
-    setScaffoldOpen(false);
-    const term = xtermRef.current;
-    term.writeln(`\r\n\x1b[1;36m⚡ Scaffolding project...\x1b[0m`);
-    term.writeln(`\x1b[90m$ ${cmd}\x1b[0m\r\n`);
-    await executeCommand(cmd);
+  const getPrompt = useCallback((cwd: string) => {
+    const dir = cwd ? cwd : "~";
+    return `\r\n\x1b[1;32mcodetogether@workspace\x1b[0m:\x1b[1;34m${dir}\x1b[0m$ `;
   }, []);
+
+  const writePromptForTab = useCallback((tabId: string) => {
+    const rt = runtimesRef.current.get(tabId);
+    if (!rt) return;
+    rt.term.write(getPrompt(rt.cwd));
+    rt.inputBuffer = "";
+  }, [getPrompt]);
+
+  const sendInputToBackend = async (sessionId: string, data: string) => {
+    try {
+      await fetch("/api/terminal", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ action: "input", sessionId, data, rawInput: true }),
+      });
+    } catch {}
+  };
+
+  const sendSignalToBackend = async (sessionId: string, signal = "SIGINT") => {
+    try {
+      await fetch("/api/terminal", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ action: "signal", sessionId, signal }),
+      });
+    } catch {}
+  };
+
+  const pollSessionOutput = useCallback((tabId: string, sessId: string) => {
+    const rt = runtimesRef.current.get(tabId);
+    if (!rt) return;
+    if (rt.pollTimer) clearInterval(rt.pollTimer);
+
+    rt.pollTimer = setInterval(async () => {
+      if (!mountedRef.current) return;
+      try {
+        const res = await fetch("/api/terminal", {
+          method: "POST",
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({ action: "output", sessionId: sessId }),
+        });
+        const data = await readJsonResponse(res);
+        const chunks = Array.isArray(data.output) ? data.output : data.output ? [data.output] : [];
+
+        if (chunks.length && rt.term) {
+          const output = chunks.join("");
+          rt.term.write(output.replace(/\r?\n/g, "\r\n"));
+          onOutputLog?.(output);
+          const url = extractPreviewUrl(output);
+          if (url) onPreviewUrlChange?.(url);
+        }
+
+        if (data.files && onFilesSync) {
+          onFilesSync(data.files);
+        }
+
+        if (!data.running) {
+          if (rt.pollTimer) clearInterval(rt.pollTimer);
+          rt.pollTimer = null;
+          rt.running = false;
+          setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, running: false } : t)));
+          writePromptForTab(tabId);
+        }
+      } catch (err: any) {
+        if (rt.pollTimer) clearInterval(rt.pollTimer);
+        rt.pollTimer = null;
+        rt.running = false;
+        setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, running: false } : t)));
+        if (rt.term) {
+          rt.term.writeln(`\r\n\x1b[31mTerminal notice: ${err.message || "Process ended"}\x1b[0m`);
+        }
+        writePromptForTab(tabId);
+      }
+    }, 350);
+  }, [onFilesSync, onOutputLog, onPreviewUrlChange, writePromptForTab]);
+
+  const executeCommandOnTab = useCallback(async (tabId: string, cmd: string) => {
+    const rt = runtimesRef.current.get(tabId);
+    if (!rt) return;
+    const term = rt.term;
+    const tabObj = tabs.find((t) => t.id === tabId);
+    const currentSessionId = tabObj?.sessionId || `sess_${roomId}_${tabId}_${Date.now()}`;
+
+    if (cmd === "clear" || cmd === "cls") {
+      term.clear();
+      writePromptForTab(tabId);
+      return;
+    }
+
+    if (cmd.startsWith("cd ")) {
+      const target = cmd.slice(3).trim();
+      rt.cwd = joinPath(rt.cwd, target);
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, cwd: rt.cwd } : t)));
+      writePromptForTab(tabId);
+      return;
+    }
+
+    rt.running = true;
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, running: true } : t)));
+
+    try {
+      const res = await fetch("/api/terminal", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          action: "start",
+          command: cmd,
+          sessionId: currentSessionId,
+          cwd: rt.cwd,
+          files,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Command execution failed (${res.status})`);
+      }
+      pollSessionOutput(tabId, data.sessionId || currentSessionId);
+    } catch (err: any) {
+      term.writeln(`\r\n\x1b[31mError running command: ${err.message}\x1b[0m`);
+      rt.running = false;
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, running: false } : t)));
+      writePromptForTab(tabId);
+    }
+  }, [files, pollSessionOutput, roomId, tabs, writePromptForTab]);
+
+  const initTerminalForTab = useCallback((tabId: string, container: HTMLDivElement) => {
+    if (runtimesRef.current.has(tabId)) return;
+
+    const term = new XTerm({
+      theme: {
+        background: "#0a0a0a",
+        foreground: "#cccccc",
+        cursor: "#ffffff",
+        selectionBackground: "rgba(255,255,255,0.25)",
+        black: "#000000",
+        red: "#ef4444",
+        green: "#22c55e",
+        yellow: "#eab308",
+        blue: "#3b82f6",
+        magenta: "#a855f7",
+        cyan: "#06b6d4",
+        white: "#ffffff",
+      },
+      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+      fontSize: 13,
+      lineHeight: 1.25,
+      cursorBlink: true,
+      scrollback: 2000,
+      convertEol: true,
+    });
+
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(container);
+    fit.fit();
+
+    const rt: TabRuntime = {
+      term,
+      fit,
+      pollTimer: null,
+      inputBuffer: "",
+      history: [],
+      historyIndex: -1,
+      running: false,
+      cwd: "",
+    };
+
+    runtimesRef.current.set(tabId, rt);
+
+    term.writeln("\x1b[1;37mCodeTogether Interactive Terminal\x1b[0m");
+    term.writeln("\x1b[90mSupports bash, node, npm, python, git, curl, and custom scripts.\x1b[0m");
+    term.write(getPrompt(""));
+
+    term.onData((data) => {
+      const currentRt = runtimesRef.current.get(tabId);
+      if (!currentRt) return;
+
+      if (currentRt.running) {
+        // Handle Ctrl+C while running
+        if (data === "\x03") {
+          const tab = tabs.find((t) => t.id === tabId);
+          if (tab) {
+            sendSignalToBackend(tab.sessionId, "SIGINT");
+          }
+          currentRt.term.writeln("^C");
+          return;
+        }
+        sendInputToBackend(tabs.find((t) => t.id === tabId)?.sessionId || "", data);
+        return;
+      }
+
+      // Enter key
+      if (data === "\r") {
+        const cmd = currentRt.inputBuffer.trim();
+        currentRt.term.writeln("");
+        if (cmd) {
+          currentRt.history.push(cmd);
+          currentRt.historyIndex = currentRt.history.length;
+          currentRt.inputBuffer = "";
+          executeCommandOnTab(tabId, cmd);
+        } else {
+          writePromptForTab(tabId);
+        }
+        return;
+      }
+
+      // Backspace
+      if (data === "\x7f" || data === "\b") {
+        if (currentRt.inputBuffer.length > 0) {
+          currentRt.inputBuffer = currentRt.inputBuffer.slice(0, -1);
+          currentRt.term.write("\b \b");
+        }
+        return;
+      }
+
+      // Ctrl+C at prompt
+      if (data === "\x03") {
+        currentRt.term.writeln("^C");
+        currentRt.inputBuffer = "";
+        writePromptForTab(tabId);
+        return;
+      }
+
+      // Ctrl+L (Clear screen)
+      if (data === "\x0c") {
+        currentRt.term.clear();
+        writePromptForTab(tabId);
+        if (currentRt.inputBuffer) {
+          currentRt.term.write(currentRt.inputBuffer);
+        }
+        return;
+      }
+
+      // Ctrl+U (Clear line)
+      if (data === "\x15") {
+        while (currentRt.inputBuffer.length > 0) {
+          currentRt.term.write("\b \b");
+          currentRt.inputBuffer = currentRt.inputBuffer.slice(0, -1);
+        }
+        return;
+      }
+
+      // Arrow Up (History previous)
+      if (data === "\x1b[A") {
+        if (currentRt.history.length > 0 && currentRt.historyIndex > 0) {
+          currentRt.historyIndex -= 1;
+          const prevCmd = currentRt.history[currentRt.historyIndex] || "";
+          while (currentRt.inputBuffer.length > 0) {
+            currentRt.term.write("\b \b");
+            currentRt.inputBuffer = currentRt.inputBuffer.slice(0, -1);
+          }
+          currentRt.inputBuffer = prevCmd;
+          currentRt.term.write(prevCmd);
+        }
+        return;
+      }
+
+      // Arrow Down (History next)
+      if (data === "\x1b[B") {
+        if (currentRt.history.length > 0 && currentRt.historyIndex < currentRt.history.length) {
+          currentRt.historyIndex += 1;
+          const nextCmd = currentRt.historyIndex < currentRt.history.length ? currentRt.history[currentRt.historyIndex] : "";
+          while (currentRt.inputBuffer.length > 0) {
+            currentRt.term.write("\b \b");
+            currentRt.inputBuffer = currentRt.inputBuffer.slice(0, -1);
+          }
+          currentRt.inputBuffer = nextCmd;
+          currentRt.term.write(nextCmd);
+        }
+        return;
+      }
+
+      // Normal printable characters
+      if (data >= " " || data === "\t") {
+        currentRt.inputBuffer += data;
+        currentRt.term.write(data);
+      }
+    });
+  }, [executeCommandOnTab, getPrompt, tabs, writePromptForTab]);
+
+  const addTab = () => {
+    const num = nextTabNumRef.current++;
+    const newId = `tab-${num}`;
+    const newTab: TerminalTab = {
+      id: newId,
+      title: `${num}: bash`,
+      sessionId: `sess_${roomId}_${num}_${Date.now()}`,
+      running: false,
+      cwd: "",
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newId);
+  };
+
+  const closeTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rt = runtimesRef.current.get(tabId);
+    if (rt) {
+      if (rt.pollTimer) clearInterval(rt.pollTimer);
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab) {
+        fetch("/api/terminal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "stop", sessionId: tab.sessionId }),
+        }).catch(() => {});
+      }
+      rt.term.dispose();
+      runtimesRef.current.delete(tabId);
+    }
+
+    setTabs((prev) => {
+      const filtered = prev.filter((t) => t.id !== tabId);
+      if (filtered.length === 0) {
+        const num = nextTabNumRef.current++;
+        const fallback: TerminalTab = {
+          id: `tab-${num}`,
+          title: `${num}: bash`,
+          sessionId: `sess_${roomId}_${num}_${Date.now()}`,
+          running: false,
+          cwd: "",
+        };
+        setActiveTabId(fallback.id);
+        return [fallback];
+      }
+      if (activeTabId === tabId) {
+        setActiveTabId(filtered[filtered.length - 1].id);
+      }
+      return filtered;
+    });
+  };
+
+  const runCode = useCallback(async () => {
+    const rt = runtimesRef.current.get(activeTabId);
+    if (!rt) return;
+    const term = rt.term;
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    const currentSessionId = activeTab?.sessionId || `sess_${roomId}_${activeTabId}_${Date.now()}`;
+
+    const projectRoot = findProjectRoot(files, activeFileName);
+    const targetCwd = projectRoot || rt.cwd;
+
+    rt.running = true;
+    setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, running: true } : t)));
+
+    term.writeln(`\r\n\x1b[1;36m▶ Running ${activeFileName || "script"}...\x1b[0m`);
+
+    try {
+      const res = await fetch("/api/terminal", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          action: "start",
+          code: codeRef.current,
+          language,
+          activeFileName,
+          sessionId: currentSessionId,
+          files,
+          cwd: targetCwd,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Execution failed (${res.status})`);
+      }
+      pollSessionOutput(activeTabId, data.sessionId || currentSessionId);
+    } catch (err: any) {
+      term.writeln(`\x1b[31mExecution failed: ${err.message}\x1b[0m`);
+      rt.running = false;
+      setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, running: false } : t)));
+      writePromptForTab(activeTabId);
+    }
+  }, [activeFileName, activeTabId, codeRef, files, language, pollSessionOutput, roomId, tabs, writePromptForTab]);
+
+  const stopCode = async () => {
+    const rt = runtimesRef.current.get(activeTabId);
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    if (activeTab) {
+      sendSignalToBackend(activeTab.sessionId, "SIGTERM");
+      try {
+        await fetch("/api/terminal", {
+          method: "POST",
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({ action: "stop", sessionId: activeTab.sessionId }),
+        });
+      } catch {}
+    }
+    if (rt) {
+      if (rt.pollTimer) clearInterval(rt.pollTimer);
+      rt.pollTimer = null;
+      rt.running = false;
+      rt.term.writeln("\r\n\x1b[31m[Process terminated]\x1b[0m");
+      writePromptForTab(activeTabId);
+    }
+    setTabs((prev) => prev.map((t) => (t.id === activeTabId ? { ...t, running: false } : t)));
+  };
+
+  const executeScaffold = useCallback(async (cmd: string) => {
+    setScaffoldOpen(false);
+    const rt = runtimesRef.current.get(activeTabId);
+    if (!rt) return;
+    rt.term.writeln(`\r\n\x1b[1;35m⚡ Scaffolding project...\x1b[0m`);
+    rt.term.writeln(`\x1b[90m$ ${cmd}\x1b[0m\r\n`);
+    await executeCommandOnTab(activeTabId, cmd);
+  }, [activeTabId, executeCommandOnTab]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      runtimesRef.current.forEach((rt) => {
+        if (rt.pollTimer) clearInterval(rt.pollTimer);
+        rt.term.dispose();
+      });
+      runtimesRef.current.clear();
     };
   }, []);
 
-  const getPrompt = useCallback(() => {
-    const dir = cwdRef.current ? cwdRef.current : "~";
-    return `\r\n\x1b[1;37mcodetogether@workspace\x1b[0m:\x1b[1;37m${dir}\x1b[0m$ `;
-  }, []);
+  useEffect(() => {
+    tabs.forEach((tab) => {
+      const el = containerRefs.current.get(tab.id);
+      if (el && !runtimesRef.current.has(tab.id)) {
+        initTerminalForTab(tab.id, el);
+      }
+    });
+  }, [tabs, initTerminalForTab]);
 
-  const writePrompt = useCallback(() => {
-    if (!xtermRef.current) return;
-    xtermRef.current.write(getPrompt());
-    inputLineRef.current = "";
-  }, [getPrompt]);
+  useEffect(() => {
+    const rt = runtimesRef.current.get(activeTabId);
+    if (rt) {
+      setTimeout(() => {
+        rt.fit.fit();
+        rt.term.focus();
+      }, 50);
+    }
+  }, [activeTabId]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const rt = runtimesRef.current.get(activeTabId);
+      if (rt) rt.fit.fit();
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [activeTabId]);
+
+  useEffect(() => {
+    if (triggerRun > 0 && triggerRun !== lastRunRef.current) {
+      lastRunRef.current = triggerRun;
+      runCode();
+    }
+  }, [triggerRun, runCode]);
 
   useEffect(() => {
     if (!scaffoldOpen) return;
@@ -169,272 +632,90 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
     return () => document.removeEventListener("mousedown", handleClick);
   }, [scaffoldOpen]);
 
-  useEffect(() => {
-    if (!termRef.current || xtermRef.current) return;
-
-    const term = new XTerm({
-      theme: {
-        background: "#0a0a0a",
-        foreground: "#cccccc",
-        cursor: "#ffffff",
-        selectionBackground: "rgba(255,255,255,0.2)",
-      },
-      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-      fontSize: 13,
-      cursorBlink: true,
-      scrollback: 1000,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(termRef.current);
-    fit.fit();
-
-    xtermRef.current = term;
-    fitRef.current = fit;
-
-    term.writeln("\x1b[1;37mCodeTogether Interactive Terminal\x1b[0m");
-    term.writeln("Type commands, run code, or test scripts in real time.");
-    term.write(getPrompt());
-
-    term.onData((data) => {
-      if (runningRef.current) {
-        sendInputToBackend(data);
-        return;
-      }
-
-      if (data === "\r") {
-        const cmd = inputLineRef.current.trim();
-        term.writeln("");
-        if (cmd) {
-          executeCommand(cmd);
-        } else {
-          writePrompt();
-        }
-      } else if (data === "\x7f") {
-        if (inputLineRef.current.length > 0) {
-          inputLineRef.current = inputLineRef.current.slice(0, -1);
-          term.write("\b \b");
-        }
-      } else if (data >= " " || data === "\t") {
-        inputLineRef.current += data;
-        term.write(data);
-      }
-    });
-
-    const handleResize = () => fit.fit();
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      if (pollRef.current) clearInterval(pollRef.current);
-      term.dispose();
-      xtermRef.current = null;
-    };
-  }, [getPrompt, writePrompt]);
-
-  const sendInputToBackend = async (data: string) => {
-    try {
-      await fetch("/api/terminal", {
-        method: "POST",
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({ action: "input", sessionId: sessionId.current, data, rawInput: true }),
-      });
-    } catch {}
-  };
-
-  const pollSessionOutput = useCallback((id: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch("/api/terminal", {
-          method: "POST",
-          headers: await getAuthHeaders(),
-          body: JSON.stringify({ action: "output", sessionId: id }),
-        });
-        const data = await readJsonResponse(res);
-        const chunks = Array.isArray(data.output) ? data.output : data.output ? [data.output] : [];
-
-        if (chunks.length && xtermRef.current) {
-          const output = chunks.join("");
-          xtermRef.current.write(output.replace(/\n/g, "\r\n"));
-          onOutputLog?.(output);
-          const url = extractPreviewUrl(output);
-          if (url) onPreviewUrlChange?.(url);
-        }
-
-        if (data.files && onFilesSync) {
-          onFilesSync(data.files);
-        }
-
-        if (!data.running) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (mountedRef.current) {
-            setRunning(false);
-            runningRef.current = false;
-            writePrompt();
-          }
-        }
-      } catch (err: any) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        if (xtermRef.current) {
-          xtermRef.current.writeln(`\r\n\x1b[31mTerminal error: ${err.message}\x1b[0m`);
-        }
-        if (mountedRef.current) {
-          setRunning(false);
-          runningRef.current = false;
-          writePrompt();
-        }
-      }
-    }, 450);
-  }, [onFilesSync, onOutputLog, onPreviewUrlChange, writePrompt]);
-
-  const executeCommand = async (cmd: string) => {
-    if (!xtermRef.current) return;
-    const term = xtermRef.current;
-
-    if (cmd === "clear" || cmd === "cls") {
-      term.clear();
-      writePrompt();
-      return;
-    }
-
-    if (cmd.startsWith("cd ")) {
-      const target = cmd.slice(3).trim();
-      cwdRef.current = joinPath(cwdRef.current, target);
-      writePrompt();
-      return;
-    }
-
-    setRunning(true);
-    runningRef.current = true;
-
-    try {
-      const res = await fetch("/api/terminal", {
-        method: "POST",
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({
-          action: "start",
-          command: cmd,
-          sessionId: sessionId.current,
-          cwd: cwdRef.current,
-          files,
-        }),
-      });
-
-      const data = await readJsonResponse(res);
-      if (!res.ok || data.error) {
-        throw new Error(data.error || `Terminal request failed (${res.status})`);
-      }
-      pollSessionOutput(data.sessionId || sessionId.current);
-    } catch (err: any) {
-      term.writeln(`\r\n\x1b[31mError running command: ${err.message}\x1b[0m`);
-      if (mountedRef.current) setRunning(false);
-      runningRef.current = false;
-      writePrompt();
-    }
-  };
-
-  const runCode = useCallback(async () => {
-    if (!xtermRef.current) return;
-    const term = xtermRef.current;
-
-    const projectRoot = findProjectRoot(files, activeFileName);
-    const targetCwd = projectRoot || cwdRef.current;
-
-    setRunning(true);
-    runningRef.current = true;
-
-    term.writeln(`\r\n\x1b[1;37mRunning ${activeFileName}...\x1b[0m`);
-
-    try {
-      const res = await fetch("/api/terminal", {
-        method: "POST",
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({
-          action: "start",
-          code: codeRef.current,
-          language,
-          activeFileName,
-          sessionId: sessionId.current,
-          files,
-          cwd: targetCwd,
-        }),
-      });
-
-      const data = await readJsonResponse(res);
-      if (!res.ok || data.error) {
-        throw new Error(data.error || `Terminal request failed (${res.status})`);
-      }
-      pollSessionOutput(data.sessionId || sessionId.current);
-    } catch (err: any) {
-      term.writeln(`\x1b[31mExecution failed: ${err.message}\x1b[0m`);
-      if (mountedRef.current) setRunning(false);
-      runningRef.current = false;
-      writePrompt();
-    }
-  }, [activeFileName, codeRef, files, language, pollSessionOutput, writePrompt]);
-
-  const stopCode = async () => {
-    try {
-      await fetch("/api/terminal", {
-        method: "POST",
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({ action: "stop", sessionId: sessionId.current }),
-      });
-    } catch {}
-    setRunning(false);
-    runningRef.current = false;
-    if (xtermRef.current) {
-      xtermRef.current.writeln("\r\n\x1b[31m[Process terminated]\x1b[0m");
-      writePrompt();
-    }
-  };
-
-  useEffect(() => {
-    if (triggerRun > 0 && triggerRun !== lastRunRef.current) {
-      lastRunRef.current = triggerRun;
-      runCode();
-    }
-  }, [triggerRun, runCode]);
-
   const onDragStart = (e: React.MouseEvent) => {
     const startY = e.clientY;
     const startH = height;
     const onMove = (me: MouseEvent) => {
       const newH = Math.max(180, Math.min(window.innerHeight * 0.6, startH - (me.clientY - startY)));
       setHeight(newH);
-      fitRef.current?.fit();
+      const rt = runtimesRef.current.get(activeTabId);
+      if (rt) rt.fit.fit();
     };
-    const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
     e.preventDefault();
   };
 
+  const currentTabObj = tabs.find((t) => t.id === activeTabId);
+  const isCurrentRunning = Boolean(currentTabObj?.running);
+
   return (
-    <div style={{ height }} className="flex flex-col bg-ct-dark-black border-t border-[#2a2a2a] relative shrink-0 min-h-[180px] max-h-[60vh] text-gray-200">
+    <div
+      style={{ height }}
+      className="flex flex-col bg-[#0a0a0a] border-t border-[#2a2a2a] relative shrink-0 min-h-[180px] max-h-[60vh] text-gray-200"
+    >
       {/* Resize handle */}
       <div onMouseDown={onDragStart} className="absolute -top-[3px] left-0 right-0 h-[6px] cursor-ns-resize z-10" />
 
-      {/* Header */}
-      <div className="h-[36px] flex items-center bg-ct-dark-black border-b border-[#2a2a2a] px-3.5 gap-3 shrink-0">
-        <div className="flex gap-3 flex-1">
-          <span className="text-[11px] font-bold text-white uppercase tracking-wider">Terminal</span>
-          <span className="text-[11px] text-gray-400 font-mono">{activeFileName}</span>
+      {/* Header with VS Code-like multi-terminal tabs */}
+      <div className="h-[36px] flex items-center bg-[#141414] border-b border-[#2a2a2a] px-2.5 gap-2 shrink-0 select-none">
+        {/* Terminal Tabs list */}
+        <div className="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTabId;
+            return (
+              <div
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                className={`group flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono cursor-pointer transition-colors border ${
+                  isActive
+                    ? "bg-[#202020] border-[#444] text-white"
+                    : "bg-transparent border-transparent text-gray-400 hover:bg-[#1a1a1a] hover:text-gray-300"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    tab.running ? "bg-emerald-400 animate-pulse" : "bg-gray-500"
+                  }`}
+                />
+                <TerminalIcon size={12} className="shrink-0 opacity-70" />
+                <span className="truncate max-w-[90px]">{tab.title}</span>
+                <button
+                  onClick={(e) => closeTab(tab.id, e)}
+                  title="Close terminal"
+                  className="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 rounded transition-opacity"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+
+          <button
+            onClick={addTab}
+            title="New Terminal"
+            className="flex items-center justify-center p-1 rounded hover:bg-[#252525] text-gray-400 hover:text-white transition-colors"
+          >
+            <Plus size={14} />
+          </button>
         </div>
+
+        {/* Right Action Controls */}
         <div className="flex gap-1.5 items-center relative">
           <div className="relative" data-scaffold-dropdown>
             <button
               onClick={() => setScaffoldOpen(!scaffoldOpen)}
               title="Quick scaffold project"
-              className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/20 border border-purple-500/40 rounded text-purple-300 cursor-pointer text-[11px] font-bold hover:bg-purple-500/30 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/20 border border-purple-500/40 rounded text-purple-300 cursor-pointer text-[11px] font-bold hover:bg-purple-500/30 transition-colors"
             >
               <Zap size={11} /> Scaffold <ChevronDown size={10} />
             </button>
             {scaffoldOpen && (
-              <div className="absolute top-full right-0 mt-1 bg-[#1a1a2e] border border-[#333] rounded-lg shadow-2xl z-50 min-w-[220px] overflow-hidden">
+              <div className="absolute top-full right-0 mt-1 bg-[#1a1a2e] border border-[#333] rounded-lg shadow-2xl z-50 min-w-[240px] overflow-hidden">
                 {SCAFFOLD_TEMPLATES.map((tpl) => (
                   <button
                     key={tpl.label}
@@ -447,25 +728,57 @@ export default function TerminalPanel({ onClose, roomId, codeRef, language, acti
               </div>
             )}
           </div>
-          {running ? (
-            <button onClick={stopCode} title="Stop" className="flex items-center gap-1 px-2.5 py-0.5 bg-red-500/20 border border-red-500/40 rounded text-red-400 cursor-pointer text-[11px] font-bold">
-              <Square size={11}/> Stop
+
+          {isCurrentRunning ? (
+            <button
+              onClick={stopCode}
+              title="Stop active command"
+              className="flex items-center gap-1 px-2.5 py-1 bg-red-500/20 border border-red-500/40 rounded text-red-400 cursor-pointer text-[11px] font-bold hover:bg-red-500/30 transition-colors"
+            >
+              <Square size={11} /> Stop
             </button>
           ) : (
-            <button onClick={runCode} title="Run code" className="flex items-center gap-1 px-2.5 py-0.5 bg-white border border-white rounded text-black cursor-pointer text-[11px] font-bold hover:bg-gray-200 transition-colors">
+            <button
+              onClick={runCode}
+              title={`Run ${activeFileName || "current file"}`}
+              className="flex items-center gap-1 px-2.5 py-1 bg-white border border-white rounded text-black cursor-pointer text-[11px] font-bold hover:bg-gray-200 transition-colors"
+            >
               <Play size={11} fill="black" /> Run
             </button>
           )}
-          <button onClick={() => xtermRef.current?.clear()} title="Clear" className="p-[3px_8px] bg-transparent border-none text-gray-400 cursor-pointer rounded hover:text-white">
-            <Trash2 size={13}/>
+
+          <button
+            onClick={() => runtimesRef.current.get(activeTabId)?.term.clear()}
+            title="Clear terminal"
+            className="p-[4px_8px] bg-transparent border-none text-gray-400 cursor-pointer rounded hover:text-white transition-colors"
+          >
+            <Trash2 size={13} />
           </button>
-          <button onClick={onClose} title="Close" className="p-[3px_8px] bg-transparent border-none text-gray-400 cursor-pointer rounded hover:text-white">
-            <X size={14}/>
+
+          <button
+            onClick={onClose}
+            title="Close panel"
+            className="p-[4px_8px] bg-transparent border-none text-gray-400 cursor-pointer rounded hover:text-white transition-colors"
+          >
+            <X size={14} />
           </button>
         </div>
       </div>
 
-      <div ref={termRef} className="flex-1 overflow-hidden p-[4px_2px]" />
+      {/* Terminal Viewports for all tabs */}
+      <div className="flex-1 relative overflow-hidden p-[4px_4px]">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            ref={(el) => {
+              if (el) containerRefs.current.set(tab.id, el);
+              else containerRefs.current.delete(tab.id);
+            }}
+            style={{ display: tab.id === activeTabId ? "block" : "none" }}
+            className="w-full h-full"
+          />
+        ))}
+      </div>
     </div>
   );
 }

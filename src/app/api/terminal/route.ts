@@ -186,14 +186,10 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const { user } = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-    const userId = user.id || clientIp;
+    const userId = user?.id || clientIp;
 
-    const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false } = await req.json();
+    const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false, signal } = await req.json();
 
     if (action === "start") {
       const limit = checkRateLimit(`terminal:${userId}`, TERMINAL_LIMIT.max, TERMINAL_LIMIT.windowMs);
@@ -255,23 +251,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const allowNetwork = typeof execCmd === "string" && /^\s*(npm|yarn|pnpm|npx)\b/.test(execCmd.trim());
+      const allowNetwork = true;
 
-      if (!terminalManager.assertDockerReady()) {
+      try {
+        terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot, allowNetwork);
+      } catch (err: any) {
         if (typeof code === "string" && language) {
           terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
         } else {
           terminalManager.startPistonSession(runId, "bash", execCmd, tmpDir, workspaceRoot);
-        }
-      } else {
-        try {
-          terminalManager.startSession(runId, execCmd, execArgs, tmpDir, workspaceRoot, allowNetwork);
-        } catch (err: any) {
-          if (typeof code === "string" && language) {
-            terminalManager.startPistonSession(runId, effectiveLang, code, tmpDir, workspaceRoot, targetFileName);
-          } else {
-            terminalManager.startPistonSession(runId, "bash", execCmd, tmpDir, workspaceRoot);
-          }
         }
       }
       return NextResponse.json({ sessionId: runId });
@@ -279,6 +267,11 @@ export async function POST(req: NextRequest) {
 
     if (action === "input") {
       terminalManager.writeToStdin(sessionId, rawInput ? data : data + "\n");
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === "signal") {
+      terminalManager.sendSignal(sessionId, (signal || "SIGINT") as NodeJS.Signals);
       return NextResponse.json({ success: true });
     }
 

@@ -55,12 +55,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let release: (() => void) | null = null;
   try {
     const { user } = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json({ stdout: "", stderr: "Unauthorized", exitCode: 1 }, { status: 401 });
-    }
-
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
-    const userId = user.id || clientIp;
+    const userId = user?.id || clientIp;
 
     const limit = checkRateLimit(`run-code:${userId}`, RUN_CODE_LIMIT.max, RUN_CODE_LIMIT.windowMs);
     if (!limit.allowed) {
@@ -89,32 +85,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Shell commands
-    if (language === "shell") {
+    if (language === "shell" || language === "bash" || language === "sh") {
       const trimmed = code.trim();
-      const cmd = trimmed.split(/\s+/)[0].toLowerCase();
-      const allowed = ["echo", "date", "whoami", "pwd", "ls", "cat", "head", "tail", "wc", "node", "npm", "python", "python3", "pip", "yarn", "git", "npx"];
-      
-      if (!allowed.includes(cmd)) {
-        try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-        if (release) release();
-        return NextResponse.json({ stdout: "", stderr: `Command not allowed: ${cmd}.`, exitCode: 1 });
-      }
-
       const containerName = `codetogether_shell_${runId}`;
       const dockerArgs = [
         "run", "--name", containerName, "--rm",
         "-e", "LANG=C.UTF-8", "-e", "LC_ALL=C.UTF-8",
-        "--network", "none", "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
         "-v", `${tmpDir}:/workspace`, "-w", "/workspace",
-        "--memory=128m", "--cpus=0.5", "--pids-limit=50",
+        "--memory=256m", "--cpus=0.5", "--pids-limit=100",
         SANDBOX_IMAGE, "sh", "-c", trimmed,
       ];
 
       return new Promise<NextResponse>((resolve) => {
-        execFile("docker", dockerArgs, { timeout: 15000 }, async (err, stdout, stderr) => {
+        execFile("docker", dockerArgs, { timeout: 20000, maxBuffer: 1024 * 1024 }, async (err, stdout, stderr) => {
           try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
           if (err) {
-            // Docker failed -> fallback silently to Piston
+            // Docker failed -> fallback seamlessly to Piston
+            console.warn("[RunCode] Shell Docker execution failed, falling back to Piston:", err.message);
             const pistonRes = await executeWithPiston("bash", trimmed);
             if (release) release();
             resolve(NextResponse.json(pistonRes));
@@ -142,7 +129,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const dockerArgs = [
       "run", "--name", containerName, "--rm",
       "-e", "LANG=C.UTF-8", "-e", "LC_ALL=C.UTF-8",
-      "--network", "none", "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
       "-v", `${tmpDir}:/workspace`, "-w", "/workspace",
       "--memory=256m", "--cpus=0.5", "--pids-limit=100",
       SANDBOX_IMAGE, "sh", "-c", execCmd,

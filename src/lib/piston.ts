@@ -4,8 +4,6 @@ export type PistonResult = {
   exitCode: number;
 };
 
-const PISTON_ENDPOINT = "https://emkc.org/api/v2/piston/execute";
-
 export const PISTON_LANGUAGE_MAP: Record<string, { language: string; version?: string; fileName: string }> = {
   javascript: { language: "javascript", fileName: "main.js" },
   js: { language: "javascript", fileName: "main.js" },
@@ -136,13 +134,27 @@ export function resolveCodeLanguage(language: string, code: string, fileName?: s
   return norm || "javascript";
 }
 
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 12000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function tryJudge0Execution(language: string, code: string): Promise<PistonResult | null> {
   const normLang = (language || "javascript").toLowerCase().trim();
   const langId = JUDGE0_LANGUAGE_MAP[normLang];
   if (!langId) return null;
 
   try {
-    const res = await fetch("https://ce.judge0.com/submissions?wait=true", {
+    const res = await fetchWithTimeout("https://ce.judge0.com/submissions?wait=true", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -150,7 +162,7 @@ async function tryJudge0Execution(language: string, code: string): Promise<Pisto
         source_code: code,
         stdin: "",
       }),
-    });
+    }, 10000);
 
     if (!res.ok) return null;
     const data = await res.json();
@@ -169,7 +181,7 @@ async function tryJudge0Execution(language: string, code: string): Promise<Pisto
 export async function executeWithPiston(language: string, code: string, customFileName?: string): Promise<PistonResult> {
   const normLang = resolveCodeLanguage(language, code, customFileName);
 
-  // Handle non-executable content types locally rather than falling through to Piston.
+  // Handle non-executable content types locally rather than failing
   if (normLang === "html") {
     return {
       stdout: `HTML saved to ${customFileName || "index.html"}. Use Preview or open it in a browser.\n`,
@@ -192,16 +204,10 @@ export async function executeWithPiston(language: string, code: string, customFi
     };
   }
 
-  // 1. Try Judge0 CE Public Instance
-  const judge0Result = await tryJudge0Execution(normLang, code);
-  if (judge0Result && (judge0Result.stdout || judge0Result.stderr || judge0Result.exitCode === 0)) {
-    return judge0Result;
-  }
-
-  // 2. Try Piston API endpoints (engineering mirror and emkc)
+  // 1. Try Piston API endpoints first (emkc and engineering mirrors)
   const endpoints = [
-    "https://piston.engineering/api/v2/execute",
     "https://emkc.org/api/v2/piston/execute",
+    "https://piston.engineering/api/v2/execute",
   ];
 
   const config = PISTON_LANGUAGE_MAP[normLang] || { language: normLang || "javascript", fileName: "main.js" };
@@ -218,11 +224,11 @@ export async function executeWithPiston(language: string, code: string, customFi
 
   for (const endpoint of endpoints) {
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetchWithTimeout(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      }, 12000);
 
       if (response.ok) {
         const data = await response.json();
@@ -243,6 +249,12 @@ export async function executeWithPiston(language: string, code: string, customFi
     } catch {
       // try next endpoint
     }
+  }
+
+  // 2. Try Judge0 CE Public Instance as secondary fallback
+  const judge0Result = await tryJudge0Execution(normLang, code);
+  if (judge0Result && (judge0Result.stdout || judge0Result.stderr || judge0Result.exitCode === 0)) {
+    return judge0Result;
   }
 
   return {

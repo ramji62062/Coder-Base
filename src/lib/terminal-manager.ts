@@ -5,6 +5,7 @@ import { executeWithPiston } from "./piston";
 
 const FINISHED_SESSION_TTL_MS = 60_000;
 const MAX_OUTPUT_CHUNKS = 1000;
+const SANDBOX_IMAGE = "codetogether-sandbox:latest";
 
 function quoteShell(value: string) {
   const escaped = value.replace(/'/g, "'\\''");
@@ -44,8 +45,13 @@ class TerminalManager {
     return TerminalManager.instance;
   }
 
-  public assertDockerReady() {
-    return true;
+  public assertDockerReady(): boolean {
+    try {
+      execFileSync("docker", ["version"], { stdio: "ignore", timeout: 3000 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private pushOutput(session: Session, data: string) {
@@ -132,7 +138,13 @@ class TerminalManager {
       const isNpmCommand = /^\s*(npm|yarn|pnpm|npx|bun)\b/.test(fullCommand.trim());
       const proc = spawn(shell, shellArgs, {
         cwd,
-        env: { ...process.env, FORCE_COLOR: "1", BROWSER: "none", ...(isNpmCommand ? {} : { CI: "1" }) },
+        env: {
+          ...process.env,
+          FORCE_COLOR: "1",
+          TERM: "xterm-256color",
+          BROWSER: "none",
+          ...(isNpmCommand ? {} : { CI: "1" }),
+        },
         stdio: ["pipe", "pipe", "pipe"],
         detached: false,
       });
@@ -168,7 +180,7 @@ class TerminalManager {
         session.running = false;
         session.exitCode = code ?? (signal ? 1 : 0);
         if (!session.output.some((chunk) => chunk.includes("Process exited"))) {
-          this.pushOutput(session, `\r\nProcess exited with code ${session.exitCode}\r\n`);
+          this.pushOutput(session, `\r\n\x1b[90mProcess exited with code ${session.exitCode}\x1b[0m\r\n`);
         }
         this.releaseCapacity(session);
         this.scheduleCleanup(sessionId, session);
@@ -183,8 +195,27 @@ class TerminalManager {
 
   writeToStdin(sessionId: string, data: string) {
     const session = this.sessions.get(sessionId);
-    if (session && session.process && session.process.stdin) {
-      session.process.stdin.write(data);
+    if (session && session.process && session.process.stdin && !session.process.stdin.destroyed) {
+      try {
+        session.process.stdin.write(data);
+      } catch {}
+    }
+  }
+
+  sendSignal(sessionId: string, signal: NodeJS.Signals = "SIGINT") {
+    const session = this.sessions.get(sessionId);
+    if (session && session.process) {
+      try {
+        if (process.platform !== "win32" && session.process.pid) {
+          process.kill(-session.process.pid, signal);
+        } else {
+          session.process.kill(signal);
+        }
+      } catch {
+        try {
+          session.process.kill(signal);
+        } catch {}
+      }
     }
   }
 
@@ -221,7 +252,11 @@ class TerminalManager {
           } else {
             session.process.kill("SIGTERM");
           }
-        } catch {}
+        } catch {
+          try {
+            session.process.kill("SIGTERM");
+          } catch {}
+        }
         if (session.usesDocker && session.containerName) {
           execFile("docker", ["kill", session.containerName], () => {});
         }
