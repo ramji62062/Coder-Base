@@ -2,6 +2,20 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import nodemailer from "nodemailer";
 
+function getAppOrigin(request: Request) {
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    process.env.APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, "");
+  }
+
+  return new URL(request.url).origin.replace(/\/+$/, "");
+}
+
 export async function POST(request: Request) {
   try {
     const { email } = await request.json();
@@ -12,7 +26,7 @@ export async function POST(request: Request) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const redirectTo = "http://localhost:3000/reset-password";
+    const redirectTo = `${getAppOrigin(request)}/reset-password`;
 
     // Generate the recovery link using Supabase Admin API (bypasses Supabase's email sending)
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
@@ -41,7 +55,7 @@ export async function POST(request: Request) {
     const smtpPass = process.env.SMTP_PASS;
 
     if (!smtpUser || !smtpPass) {
-      console.error("[Forgot Password API] SMTP_USER or SMTP_PASS not configured in .env.local");
+      console.error("[Forgot Password API] SMTP_USER or SMTP_PASS not configured.");
       return NextResponse.json({ error: "Email service not configured." }, { status: 500 });
     }
 
