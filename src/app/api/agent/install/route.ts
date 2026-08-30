@@ -45,9 +45,14 @@ Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether" -Name "(Default)
 Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether" -Name "URL Protocol" -Value ""
 New-Item -Path "HKCU:\\Software\\Classes\\codetogether\\shell\\open\\command" -Force | Out-Null
 $vbsPath = Join-Path $ctDir "launch.vbs"
-$vbsContent = "CreateObject(\`"Wscript.Shell\`").Run \`"node \`"\`"" + $agentPath + "\`"\`" --server=\`"${baseUrl}\`" --room=\`"${roomId}\`"\`", 0, False"
+$vbsContent = @"
+Dim u
+u = ""
+If WScript.Arguments.Count > 0 Then u = WScript.Arguments(0)
+CreateObject("Wscript.Shell").Run "node ""$agentPath"" --server=""${baseUrl}"" --room=""${roomId}"" """ & u & """", 0, False
+"@
 Set-Content -Path $vbsPath -Value $vbsContent
-$cmd = "wscript.exe \`"" + $vbsPath + "\`""
+$cmd = "wscript.exe \`"" + $vbsPath + "\`" \`"%1\`""
 Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether\\shell\\open\\command" -Name "(Default)" -Value $cmd
 
 # Stop any running instances and start

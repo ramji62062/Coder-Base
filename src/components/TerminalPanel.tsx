@@ -47,6 +47,8 @@ type TabRuntime = {
   webgl: WebglAddon | null;
   attached: boolean;
   cwd: string;
+  transport: "server" | "direct-local";
+  pendingInput: string[];
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -120,6 +122,11 @@ function terminalWsUrl() {
   return `${p}//${window.location.host}/ws/terminal`;
 }
 
+function canUseDirectLocalAgent() {
+  if (typeof window === "undefined") return false;
+  return window.location.protocol === "http:" || ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────
@@ -188,10 +195,35 @@ export default function TerminalPanel({
   }, []);
 
   const sendInput = useCallback((tid: string, data: string) => {
-    if (isLocalShellRef.current && localAgentClient.isConnected()) {
-      localAgentClient.sendInput(tid, data);
+    const tab = tabsRef.current.find((t) => t.terminalId === tid);
+    const rt = tab ? runtimesRef.current.get(tab.id) : null;
+    if (!rt?.attached) {
+      if (rt && rt.pendingInput.length < 200) rt.pendingInput.push(data);
+      return;
+    }
+
+    if (rt.transport === "direct-local") {
+      if (!localAgentClient.sendInput(tid, data) && rt.pendingInput.length < 200) {
+        rt.pendingInput.push(data);
+      }
     } else {
-      sendWs({ type: "input", roomId, terminalId: tid, data });
+      if (!sendWs({ type: "input", roomId, terminalId: tid, data }) && rt.pendingInput.length < 200) {
+        rt.pendingInput.push(data);
+      }
+    }
+  }, [roomId, sendWs]);
+
+  const flushPendingInput = useCallback((terminalId: string) => {
+    const tab = tabsRef.current.find((t) => t.terminalId === terminalId);
+    const rt = tab ? runtimesRef.current.get(tab.id) : null;
+    if (!rt || !rt.attached || rt.pendingInput.length === 0) return;
+    const pending = rt.pendingInput.splice(0);
+    for (const data of pending) {
+      if (rt.transport === "direct-local") {
+        localAgentClient.sendInput(terminalId, data);
+      } else {
+        sendWs({ type: "input", roomId, terminalId, data });
+      }
     }
   }, [roomId, sendWs]);
 
@@ -201,12 +233,13 @@ export default function TerminalPanel({
     if (!rt) return;
 
     rt.fit.fit();
-    rt.attached = true;
+    rt.attached = false;
     (rt as any)._lastAttachTime = Date.now();
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, attached: true } : t)));
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, attached: false } : t)));
 
     // Route to Local Agent if connected
-    if (isLocalShellRef.current && localAgentClient.isConnected()) {
+    if (canUseDirectLocalAgent() && localAgentClient.isConnected()) {
+      rt.transport = "direct-local";
       localAgentClient.attachTerminal(terminalId, rt.term.cols, rt.term.rows);
       return;
     }
@@ -232,28 +265,35 @@ export default function TerminalPanel({
     setAgentConnecting(true);
 
     // 1. Immediate direct connect check (instant if agent is already running)
-    try {
-      await localAgentClient.connect("ws://127.0.0.1:8765");
-      if (localAgentClient.isConnected()) {
-        setAgentConnecting(false);
-        setShowLocalModal(false);
-        setIsLocalShell(true);
-        const info = localAgentClient.getAgentInfo();
-        if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
-        for (const tab of tabsRef.current) {
-          const rt = runtimesRef.current.get(tab.id);
-          if (rt) {
-            rt.attached = false;
-            attachTerminal(tab.id, tab.terminalId);
+    if (canUseDirectLocalAgent()) {
+      try {
+        await localAgentClient.connect("ws://127.0.0.1:8765");
+        if (localAgentClient.isConnected()) {
+          setAgentConnecting(false);
+          setShowLocalModal(false);
+          setIsLocalShell(true);
+          const info = localAgentClient.getAgentInfo();
+          if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
+          for (const tab of tabsRef.current) {
+            const rt = runtimesRef.current.get(tab.id);
+            if (rt) {
+              rt.attached = false;
+              attachTerminal(tab.id, tab.terminalId);
+            }
           }
+          onOutputLogRef.current?.("[terminal] Successfully connected to personal local terminal via CodeTogether Agent");
+          return;
         }
-        onOutputLogRef.current?.("[terminal] Successfully connected to personal local terminal via CodeTogether Agent");
-        return;
-      }
-    } catch {}
+      } catch {}
+    }
 
     // 2. Trigger OS protocol launch handler
     localAgentClient.triggerProtocolLaunch(roomId);
+
+    if (!canUseDirectLocalAgent()) {
+      setTimeout(() => setAgentConnecting(false), 8000);
+      return;
+    }
 
     // 3. Fast poll for agent startup & connect
     let attempts = 0;
@@ -319,7 +359,7 @@ export default function TerminalPanel({
     let webgl: WebglAddon | null = null;
     try { webgl = new WebglAddon(); term.loadAddon(webgl); } catch { webgl = null; }
 
-    const rt: TabRuntime = { term, fit, webgl, attached: false, cwd: "" };
+    const rt: TabRuntime = { term, fit, webgl, attached: false, cwd: "", transport: "server", pendingInput: [] };
     runtimesRef.current.set(tabId, rt);
 
     term.writeln("\x1b[1;37mCodeTogether Terminal\x1b[0m");
@@ -476,14 +516,27 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     const currentFiles = filesRef.current || [];
     const activeContent = (codeRef && codeRef.current) !== undefined ? codeRef.current : "";
     const currentCode = activeContent || currentFiles.find((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))?.content || "";
+    const updatedFiles = currentFiles.map((f) => {
+      if (!f.isFolder && normalizePath(f.path || f.name) === normalizePath(activeFileName)) {
+        return { ...f, content: currentCode };
+      }
+      return f;
+    });
+    if (activeFileName && !updatedFiles.some((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))) {
+      updatedFiles.push({ name: activeFileName, path: activeFileName, content: currentCode, language });
+    }
 
-    // 1. If Local Companion Terminal is connected -> execute in user's real local shell!
-    if (isLocalShellRef.current && localAgentClient.isConnected()) {
-      const projectRoot = findProjectRoot(currentFiles, activeFileName);
+    // 1. If a real terminal is attached, run through that PTY. In production
+    // this goes through the Render reverse tunnel; in local dev it may go
+    // directly to the localhost companion.
+    if (rt.attached) {
+      const projectRoot = findProjectRoot(updatedFiles, activeFileName);
       const execCmd = computeRunCommand(language, activeFileName, currentCode);
       const prefix = projectRoot && projectRoot !== "." ? `cd "${projectRoot}" && ` : "";
-      rt.term.write(`\r\n\x1b[36m# Running locally: ${execCmd}\x1b[0m\r\n`);
-      localAgentClient.sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      rt.term.write(`\r\n\x1b[36m# Running: ${execCmd}\x1b[0m\r\n`);
+      void saveFilesToWorkspace();
+      sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
+      sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
       return;
     }
 
@@ -516,7 +569,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     } catch (err: any) {
       rt.term.write(`\r\n\x1b[31m[Execution Error: ${err.message}]\x1b[0m\r\n`);
     }
-  }, [activeFileName, activeTabId, codeRef, getActiveTab, language]);
+  }, [activeFileName, activeTabId, codeRef, getActiveTab, language, roomId, saveFilesToWorkspace, sendInput, sendWs]);
 
   const stopTerminal = useCallback(() => {
     const tab = getActiveTab();
@@ -592,35 +645,47 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
           rt.term.writeln(`\r\n\x1b[90m[Local process exited with code ${exitCode}]\x1b[0m`);
         }
       },
+      onTerminalAttached: (tid) => {
+        const tab = tabsRef.current.find((t) => t.terminalId === tid);
+        const rt = tab ? runtimesRef.current.get(tab.id) : null;
+        if (rt) {
+          rt.attached = true;
+          rt.transport = "direct-local";
+          setTabs((prev) => prev.map((t) => (t.terminalId === tid ? { ...t, attached: true } : t)));
+          flushPendingInput(tid);
+        }
+      },
       onFilesUpdated: (newFiles) => {
         filesRef.current = newFiles;
         onFilesSyncRef.current?.(newFiles);
       },
       onStatusChange: (status, info) => {
-        if (status === "connected") {
+        if (status === "connected" && canUseDirectLocalAgent()) {
           setIsLocalShell(true);
           if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
         } else if (status === "disconnected") {
-          setIsLocalShell(false);
+          if (canUseDirectLocalAgent()) setIsLocalShell(false);
         }
       },
     });
 
     // Auto-probe if companion is already running locally on user's machine
-    localAgentClient.connect("ws://127.0.0.1:8765", "", 1200).then((info) => {
-      if (info && mountedRef.current) {
-        setIsLocalShell(true);
-        if (info.shell) setShellName(info.shell.split("/").pop() || info.shell);
-        for (const tab of tabsRef.current) {
-          const rt = runtimesRef.current.get(tab.id);
-          if (rt) {
-            rt.attached = false;
-            attachTerminal(tab.id, tab.terminalId);
+    if (canUseDirectLocalAgent()) {
+      localAgentClient.connect("ws://127.0.0.1:8765", "", 1200).then((info) => {
+        if (info && mountedRef.current) {
+          setIsLocalShell(true);
+          if (info.shell) setShellName(info.shell.split("/").pop() || info.shell);
+          for (const tab of tabsRef.current) {
+            const rt = runtimesRef.current.get(tab.id);
+            if (rt) {
+              rt.attached = false;
+              attachTerminal(tab.id, tab.terminalId);
+            }
           }
         }
-      }
-    }).catch(() => {});
-  }, [attachTerminal]);
+      }).catch(() => {});
+    }
+  }, [attachTerminal, flushPendingInput]);
 
   // ── Terminal WebSocket ──
   useEffect(() => {
@@ -661,8 +726,12 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
             setTabs((prev) => prev.map((t) => (t.terminalId === msg.terminalId ? { ...t, attached: true } : t)));
             runtimesRef.current.forEach((r, id) => {
               const tab = tabsRef.current.find((t) => t.id === id);
-              if (tab?.terminalId === msg.terminalId) r.attached = true;
+              if (tab?.terminalId === msg.terminalId) {
+                r.attached = true;
+                r.transport = "server";
+              }
             });
+            flushPendingInput(msg.terminalId);
             break;
           case "agent:connected": {
             setIsLocalShell(true);
@@ -748,7 +817,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
       try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
     };
-  }, [roomId, attachTerminal]);
+  }, [roomId, attachTerminal, flushPendingInput]);
 
   // Tab init
   useEffect(() => {

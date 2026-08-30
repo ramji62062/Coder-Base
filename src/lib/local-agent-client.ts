@@ -30,6 +30,7 @@ export type LocalAgentListeners = {
   onStatusChange?: (status: LocalAgentStatus, info?: LocalAgentInfo | null, error?: string | null) => void;
   onTerminalOutput?: (terminalId: string, data: string) => void;
   onTerminalExit?: (terminalId: string, exitCode: number) => void;
+  onTerminalAttached?: (terminalId: string) => void;
   onFilesUpdated?: (files: FileItem[]) => void;
   onConflict?: (conflict: { path: string; diskContent: string; diskMtime: number; message: string }) => void;
 };
@@ -178,6 +179,13 @@ export class LocalAgentClient {
 
             case "output": {
               this.listeners.onTerminalOutput?.(msg.terminalId, msg.data);
+              break;
+            }
+
+            case "attached": {
+              if (msg.ok !== false && msg.terminalId) {
+                this.listeners.onTerminalAttached?.(msg.terminalId);
+              }
               break;
             }
 
@@ -437,7 +445,7 @@ export class LocalAgentClient {
 
   public triggerProtocolLaunch(roomId: string, port = 8765, token = "") {
     if (typeof window === "undefined") return;
-    const launchUrl = `codetogether://connect?roomId=${encodeURIComponent(roomId)}&port=${port}&token=${encodeURIComponent(token)}`;
+    const launchUrl = `codetogether://connect?roomId=${encodeURIComponent(roomId)}&server=${encodeURIComponent(window.location.origin)}&port=${port}&token=${encodeURIComponent(token)}`;
     try {
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";

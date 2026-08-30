@@ -27,7 +27,15 @@ function parseArgs() {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "-p" || arg === "--port") {
+    if (String(arg || "").startsWith("codetogether://")) {
+      try {
+        const launchUrl = new URL(arg);
+        options.room = launchUrl.searchParams.get("roomId") || launchUrl.searchParams.get("room") || options.room;
+        options.server = launchUrl.searchParams.get("server") || options.server;
+        options.token = launchUrl.searchParams.get("token") || options.token;
+        options.port = parseInt(launchUrl.searchParams.get("port") || "", 10) || options.port;
+      } catch {}
+    } else if (arg === "-p" || arg === "--port") {
       options.port = parseInt(args[++i], 10) || 8765;
     } else if (arg === "-d" || arg === "--dir") {
       options.dir = path.resolve(args[++i]);
@@ -290,6 +298,20 @@ function deleteWorkspaceFile(relPath) {
     fs.unlinkSync(safe);
   }
   return { ok: true };
+}
+
+function syncIncomingFiles(files) {
+  if (!Array.isArray(files)) return;
+  for (const f of files) {
+    if (f && f.name && !f.isFolder) {
+      const targetPath = resolveSafePath(f.path || f.name);
+      if (!targetPath) continue;
+      try {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.writeFileSync(targetPath, f.content || "", "utf8");
+      } catch {}
+    }
+  }
 }
 
 // ── PTY / Shell Engine ──
@@ -747,19 +769,7 @@ function connectReverseTunnel(serverUrl, roomId) {
             const cols = Number(msg.cols) || 80;
             const rows = Number(msg.rows) || 24;
 
-            // Sync room files into the local workspace folder
-            if (Array.isArray(msg.files)) {
-              for (const f of msg.files) {
-                if (f && f.name && !f.isFolder) {
-                  const targetPath = resolveSafePath(f.path || f.name);
-                  if (!targetPath) continue;
-                  try {
-                    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-                    fs.writeFileSync(targetPath, f.content || "", "utf8");
-                  } catch {}
-                }
-              }
-            }
+            syncIncomingFiles(msg.files);
 
             const session = spawnLocalPty(terminalId, cols, rows);
 
@@ -799,6 +809,11 @@ function connectReverseTunnel(serverUrl, roomId) {
             if (session && session.alive) {
               try { session.pty.resize(cols, rows); } catch {}
             }
+            break;
+          }
+
+          case "sync-workspace": {
+            syncIncomingFiles(msg.files);
             break;
           }
 

@@ -545,13 +545,10 @@ function handleConnection(ws, req) {
             });
 
             safeSend(ws, {
-              type: "attached",
-              ok: true,
+              type: "agent:connecting",
               roomId: msg.roomId,
               terminalId: msg.terminalId || "default",
-              isLocal: true,
               shell: agent.shell,
-              workspace: "Local Machine",
             });
           } else {
             if (!browserSubscribers.has(key)) browserSubscribers.set(key, new Set());
@@ -597,6 +594,13 @@ function handleConnection(ws, req) {
           break;
 
         case "sync-workspace":
+          if (agent && agent.ws.readyState === agent.ws.OPEN) {
+            safeSend(agent.ws, {
+              type: "sync-workspace",
+              roomId: msg.roomId,
+              files: msg.files || [],
+            });
+          }
           syncFilesToWorkspace(msg.roomId, msg.files || []);
           break;
 
