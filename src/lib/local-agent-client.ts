@@ -92,6 +92,11 @@ export class LocalAgentClient {
   }
 
   public connect(url = this.currentUrl, token = this.currentToken, timeoutMs = 5000): Promise<LocalAgentInfo> {
+    // If already connected, return immediately
+    if (this.status === "connected" && this.ws?.readyState === WebSocket.OPEN && this.agentInfo) {
+      return Promise.resolve(this.agentInfo);
+    }
+
     this.currentUrl = url || DEFAULT_AGENT_URL;
     this.currentToken = token || "";
     this.shouldReconnect = true;
@@ -435,10 +440,11 @@ export class LocalAgentClient {
 
   private scheduleReconnect() {
     if (this.reconnectTimeout) return;
+    if (!this.shouldReconnect) return;
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null;
       if (this.shouldReconnect && this.status !== "connected") {
-        this.connect().catch(() => {});
+        this.connect(this.currentUrl, this.currentToken, 3000).catch(() => {});
       }
     }, 3000);
   }

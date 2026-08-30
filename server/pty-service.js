@@ -448,30 +448,44 @@ function handleConnection(ws, req) {
       const subs = browserSubscribers.get(key);
 
       switch (msg.type) {
-        case "output":
-          if (subs) {
-            for (const browserWs of subs) {
-              safeSend(browserWs, { type: "output", roomId: agentRoomId, terminalId, data: msg.data });
+        case "output": {
+          const rId = msg.roomId || agentRoomId;
+          const tId = msg.terminalId || terminalId;
+          const outKey = `${rId}:${tId}`;
+          const outSubs = browserSubscribers.get(outKey);
+          if (outSubs) {
+            for (const browserWs of outSubs) {
+              safeSend(browserWs, { type: "output", roomId: rId, terminalId: tId, data: msg.data });
             }
           }
           break;
+        }
 
-        case "exit":
-          if (subs) {
-            for (const browserWs of subs) {
-              safeSend(browserWs, { type: "exit", roomId: agentRoomId, terminalId, exitCode: msg.exitCode });
+        case "exit": {
+          const rId = msg.roomId || agentRoomId;
+          const tId = msg.terminalId || terminalId;
+          const exitKey = `${rId}:${tId}`;
+          const exitSubs = browserSubscribers.get(exitKey);
+          if (exitSubs) {
+            for (const browserWs of exitSubs) {
+              safeSend(browserWs, { type: "exit", roomId: rId, terminalId: tId, exitCode: msg.exitCode });
             }
           }
           break;
+        }
 
-        case "attached":
-          if (subs) {
-            for (const browserWs of subs) {
+        case "attached": {
+          const rId = msg.roomId || agentRoomId;
+          const tId = msg.terminalId || terminalId;
+          const attKey = `${rId}:${tId}`;
+          const attSubs = browserSubscribers.get(attKey);
+          if (attSubs) {
+            for (const browserWs of attSubs) {
               safeSend(browserWs, {
                 type: "attached",
                 ok: true,
-                roomId: agentRoomId,
-                terminalId,
+                roomId: rId,
+                terminalId: tId,
                 isLocal: true,
                 shell: msg.shell || shell,
                 workspace: msg.workspace || "Local Machine",
@@ -479,6 +493,7 @@ function handleConnection(ws, req) {
             }
           }
           break;
+        }
 
         case "files:sync":
           if (msg.files && activeIoRef) {

@@ -233,20 +233,29 @@ export default function TerminalPanel({
     const rt = runtimesRef.current.get(tabId);
     if (!rt) return;
 
+    // Skip if already attached or attach in progress
+    if (rt.attached || (rt as any)._attaching) return;
+    (rt as any)._attaching = true;
+
     rt.fit.fit();
     rt.attached = false;
     (rt as any)._lastAttachTime = Date.now();
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, attached: false } : t)));
 
-    // Route to Local Agent if connected
+    // PRIORITY 1: Route to Local Agent if connected (runs code on user's machine)
     if (canUseDirectLocalAgent() && localAgentClient.isConnected()) {
       rt.transport = "direct-local";
       localAgentClient.attachTerminal(terminalId, rt.term.cols, rt.term.rows);
+      (rt as any)._attaching = false;
       return;
     }
 
+    // PRIORITY 2: Route through server WebSocket (server-side PTY)
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      (rt as any)._attaching = false;
+      return;
+    }
     const token = await getAuthToken();
 
     sendWs({
@@ -259,6 +268,7 @@ export default function TerminalPanel({
       files: filesRef.current,
       mode: "local",
     });
+    (rt as any)._attaching = false;
   }, [roomId, sendWs]);
 
   // ── Approach B Launcher Handlers ──
@@ -290,7 +300,7 @@ export default function TerminalPanel({
           if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
           for (const tab of tabsRef.current) {
             const rt = runtimesRef.current.get(tab.id);
-            if (rt) {
+            if (rt && !rt.attached && !(rt as any)._attaching) {
               rt.attached = false;
               attachTerminal(tab.id, tab.terminalId);
             }
@@ -324,8 +334,7 @@ export default function TerminalPanel({
           if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
           for (const tab of tabsRef.current) {
             const rt = runtimesRef.current.get(tab.id);
-            if (rt) {
-              rt.attached = false;
+            if (rt && !rt.attached && !(rt as any)._attaching) {
               attachTerminal(tab.id, tab.terminalId);
             }
           }
@@ -386,9 +395,9 @@ export default function TerminalPanel({
 
     const tab = tabsRef.current.find((t) => t.id === tabId);
     if (tab) {
-      if (isLocalShellRef.current && localAgentClient.isConnected()) {
+      if (isLocalShellRef.current && localAgentClient.isConnected() && !runtimesRef.current.get(tabId)?.attached) {
         attachTerminal(tabId, tab.terminalId);
-      } else if (wsRef.current?.readyState === WebSocket.OPEN) {
+      } else if (wsRef.current?.readyState === WebSocket.OPEN && !runtimesRef.current.get(tabId)?.attached) {
         attachTerminal(tabId, tab.terminalId);
       }
     }
@@ -399,7 +408,13 @@ export default function TerminalPanel({
     const rt = runtimesRef.current.get(activeTabId);
     if (!tab || !rt) return;
     rt.fit.fit();
-    if (rt.attached) sendWs({ type: "resize", roomId, terminalId: tab.terminalId, cols: rt.term.cols, rows: rt.term.rows });
+    if (rt.attached) {
+      if (rt.transport === "direct-local") {
+        localAgentClient.resizeTerminal(tab.terminalId, rt.term.cols, rt.term.rows);
+      } else {
+        sendWs({ type: "resize", roomId, terminalId: tab.terminalId, cols: rt.term.cols, rows: rt.term.rows });
+      }
+    }
   }, [activeTabId, getActiveTab, roomId, sendWs]);
 
   // ── Save all modified files to workspace via /api/terminal ──
@@ -491,7 +506,14 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
 
     // Save files first to workspace on disk
     void saveFilesToWorkspace();
-    sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
+    if (rt.transport === "direct-local") {
+      // Sync files via local agent
+      for (const f of updatedFiles) {
+        if (!f.isFolder) localAgentClient.saveFile(f.path || f.name, f.content || "");
+      }
+    } else {
+      sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
+    }
 
     // Determine run command
     rt.term.write(`\r\n\x1b[36m# Running ${activeFileName || "script"}\x1b[0m\r\n`);
@@ -540,17 +562,20 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
       updatedFiles.push({ name: activeFileName, path: activeFileName, content: currentCode, language });
     }
 
-    // 1. If a real terminal is attached, run through that PTY. In production
-    // this goes through the Render reverse tunnel; in local dev it may go
-    // directly to the localhost companion.
+    // 1. If a real terminal is attached, run through that PTY.
     if (rt.attached) {
       const projectRoot = findProjectRoot(updatedFiles, activeFileName);
       const execCmd = computeRunCommand(language, activeFileName, currentCode);
       const prefix = projectRoot && projectRoot !== "." ? `cd "${projectRoot}" && ` : "";
-      rt.term.write(`\r\n\x1b[36m# Running: ${execCmd}\x1b[0m\r\n`);
+      rt.term.write(`\r\n\x1b[1;36m▶ Running: ${execCmd}\x1b[0m\r\n`);
       void saveFilesToWorkspace();
-      sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
-      sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      if (rt.transport === "direct-local") {
+        localAgentClient.saveFile(activeFileName, currentCode);
+        localAgentClient.sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      } else {
+        sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
+        sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      }
       return;
     }
 
@@ -602,7 +627,13 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     if (e) e.stopPropagation();
     const rt = runtimesRef.current.get(tabId);
     const tab = tabs.find((t) => t.id === tabId);
-    if (tab) sendWs({ type: "kill", roomId, terminalId: tab.terminalId });
+    if (tab && rt) {
+      if (rt.transport === "direct-local") {
+        localAgentClient.killTerminal(tab.terminalId);
+      } else {
+        sendWs({ type: "kill", roomId, terminalId: tab.terminalId });
+      }
+    }
     if (rt) { rt.webgl?.dispose(); rt.term.dispose(); runtimesRef.current.delete(tabId); }
     setTabs((prev) => {
       const filtered = prev.filter((t) => t.id !== tabId);
@@ -664,6 +695,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
         const rt = tab ? runtimesRef.current.get(tab.id) : null;
         if (rt) {
           rt.attached = true;
+          (rt as any)._attaching = false;
           rt.transport = "direct-local";
           setTabs((prev) => prev.map((t) => (t.terminalId === tid ? { ...t, attached: true } : t)));
           flushPendingInput(tid);
@@ -691,8 +723,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
           if (info.shell) setShellName(info.shell.split("/").pop() || info.shell);
           for (const tab of tabsRef.current) {
             const rt = runtimesRef.current.get(tab.id);
-            if (rt) {
-              rt.attached = false;
+            if (rt && !rt.attached && !(rt as any)._attaching) {
               attachTerminal(tab.id, tab.terminalId);
             }
           }
@@ -717,9 +748,12 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
         if (!mountedRef.current) { ws.close(); return; }
         setConnPhase("online");
         setConnectionError(null);
+        // Only attach tabs that aren't already connected via local agent
         for (const tab of tabsRef.current) {
           const rt = runtimesRef.current.get(tab.id);
-          if (rt) attachTerminal(tab.id, tab.terminalId);
+          if (rt && !rt.attached && !(rt as any)._attaching) {
+            attachTerminal(tab.id, tab.terminalId);
+          }
         }
       };
 
@@ -742,6 +776,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
               const tab = tabsRef.current.find((t) => t.id === id);
               if (tab?.terminalId === msg.terminalId) {
                 r.attached = true;
+                (r as any)._attaching = false;
                 r.transport = "server";
               }
             });
@@ -753,8 +788,7 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
             onOutputLogRef.current?.("\r\n[tunnel] Local companion terminal connected to room");
             for (const tab of tabsRef.current) {
               const rt = runtimesRef.current.get(tab.id);
-              if (rt) {
-                rt.attached = false;
+              if (rt && !rt.attached && !(rt as any)._attaching) {
                 attachTerminal(tab.id, tab.terminalId);
               }
             }
@@ -784,30 +818,35 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
             const rt = runtimesRef.current.get(tab.id);
 
             // Track rapid exits to prevent infinite reconnect loops
-            // If the shell exits within 2 seconds of attach, it's a spawn failure
             const now = Date.now();
             const lastAttach = (rt as any)?._lastAttachTime || 0;
-            const rapidExit = now - lastAttach < 2000;
+            const rapidExit = now - lastAttach < 3000;
             const prevFails = ((rt as any)?._rapidExitCount || 0);
             const rapidExitCount = rapidExit ? prevFails + 1 : 0;
 
             if (rt) {
               (rt as any)._rapidExitCount = rapidExitCount;
+              rt.attached = false;
+              (rt as any)._attaching = false;
             }
 
-            if (rapidExitCount >= 3) {
-              // Stop retrying — server can't spawn a shell
+            // If local agent is connected, don't auto-reconnect server PTY - 
+            // the local agent handles its own reconnection
+            if (localAgentClient.isConnected()) {
+              rt?.term.writeln(`\r\n\x1b[90m[Process exited with code ${msg.exitCode}]\x1b[0m`);
+              setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, attached: false } : t)));
+              break;
+            }
+
+            if (rapidExitCount >= 2) {
               rt?.term.writeln("\r\n\x1b[31m[Shell failed to start on the server]\x1b[0m");
-              rt?.term.writeln("\x1b[33mThe server environment does not have a compatible shell.\x1b[0m");
-              rt?.term.writeln("\x1b[33mUse the \"Local Terminal\" tab instead — click the Launch button to connect your own terminal.\x1b[0m");
-              rt?.term.writeln("\x1b[90m(Automatic reconnect stopped after 3 failed attempts)\x1b[0m");
-              if (rt) rt.attached = false;
+              rt?.term.writeln("\x1b[33mClick \"Connect Local\" to use your personal terminal instead.\x1b[0m");
+              rt?.term.writeln("\x1b[90m(Automatic reconnect stopped after 2 failed attempts)\x1b[0m");
               setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, attached: false } : t)));
               break;
             }
 
             rt?.term.writeln("\r\n\x1b[90m[Shell exited — reconnecting…]\x1b[0m");
-            if (rt) rt.attached = false;
             setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, attached: false } : t)));
             const delay = rapidExit ? Math.min(1000 * Math.pow(2, rapidExitCount), 5000) : 600;
             setTimeout(() => { if (mountedRef.current) attachTerminal(tab.id, tab.terminalId); }, delay);
@@ -838,8 +877,11 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     tabs.forEach((tab) => {
       const el = containerRefs.current.get(tab.id);
       if (el && !runtimesRef.current.has(tab.id)) initTerminalForTab(tab.id, el);
-      else if (el && runtimesRef.current.has(tab.id) && !runtimesRef.current.get(tab.id)!.attached && wsRef.current?.readyState === WebSocket.OPEN) {
-        attachTerminal(tab.id, tab.terminalId);
+      else if (el && runtimesRef.current.has(tab.id)) {
+        const rt = runtimesRef.current.get(tab.id);
+        if (rt && !rt.attached && !(rt as any)._attaching && wsRef.current?.readyState === WebSocket.OPEN) {
+          attachTerminal(tab.id, tab.terminalId);
+        }
       }
     });
   }, [tabs, initTerminalForTab, attachTerminal]);
