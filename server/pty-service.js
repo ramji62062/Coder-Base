@@ -126,6 +126,28 @@ function spawnShell(command, args, opts) {
   return wrapper;
 }
 
+function detectValidShell() {
+  if (process.platform === "win32") {
+    return process.env.COMSPEC || "powershell.exe";
+  }
+  const candidates = [
+    process.env.SHELL,
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/sh",
+    "/usr/bin/sh",
+    "/bin/zsh",
+    "/usr/bin/zsh",
+  ].filter(Boolean);
+
+  for (const sh of candidates) {
+    try {
+      if (existsSync(sh)) return sh;
+    } catch {}
+  }
+  return "/bin/sh";
+}
+
 // ─── Spawn a local shell (no Docker) ─────────────────────────────────
 async function spawnLocalPty(roomId, terminalId, cols, rows, files) {
   const key = sessionKey(roomId, terminalId);
@@ -133,8 +155,8 @@ async function spawnLocalPty(roomId, terminalId, cols, rows, files) {
   try { mkdirSync(workspacePath, { recursive: true }); } catch {}
   syncFilesToWorkspace(roomId, files);
 
-  const shell = process.env.SHELL || (process.platform === "win32" ? "powershell.exe" : "/bin/zsh");
-  const args = process.platform === "win32" ? [] : ["-l"];
+  const shell = detectValidShell();
+  const args = process.platform === "win32" ? [] : (shell.endsWith("sh") || shell.endsWith("bash") || shell.endsWith("zsh") ? ["-l"] : []);
 
   let wrapper;
   try {
@@ -144,8 +166,16 @@ async function spawnLocalPty(roomId, terminalId, cols, rows, files) {
       env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", FORCE_COLOR: "1" },
     });
   } catch (err) {
-    recordError("pty_local_spawn_failed", `${key}: ${err.message}`);
-    throw new Error(`Failed to start local shell: ${err.message}`);
+    try {
+      wrapper = spawnShell("/bin/sh", [], {
+        cols, rows,
+        cwd: workspacePath,
+        env: { ...process.env, TERM: "xterm-256color" },
+      });
+    } catch (fallbackErr) {
+      recordError("pty_local_spawn_failed", `${key}: ${err.message}`);
+      throw new Error(`Failed to start local shell: ${err.message}`);
+    }
   }
 
   const session = {
@@ -285,14 +315,26 @@ async function onAttach(ws, send, msg) {
 
   if (!session || !session.alive) {
     if (shouldUseLocal) {
-      session = await spawnLocalPty(auth.roomId, terminalId, cols, rows, files);
+      try {
+        session = await spawnLocalPty(auth.roomId, terminalId, cols, rows, files);
+      } catch (localErr) {
+        console.error(`[terminal] Local shell spawn failed: ${localErr.message}`);
+        send({ type: "attached", ok: false, terminalId, error: `Shell spawn failed: ${localErr.message}` });
+        return;
+      }
     } else {
       try {
         const rc = await ensureRoomContainer(auth.roomId, files, assignDevServerPort(auth.roomId));
         session = await spawnPty(auth.roomId, terminalId, rc.container.id, cols, rows);
       } catch (dockerErr) {
         console.warn(`[terminal] Docker spawn failed (${dockerErr.message}), falling back to local shell`);
-        session = await spawnLocalPty(auth.roomId, terminalId, cols, rows, files);
+        try {
+          session = await spawnLocalPty(auth.roomId, terminalId, cols, rows, files);
+        } catch (localErr) {
+          console.error(`[terminal] Local shell fallback also failed: ${localErr.message}`);
+          send({ type: "attached", ok: false, terminalId, error: `No shell available: ${localErr.message}` });
+          return;
+        }
       }
     }
   } else {

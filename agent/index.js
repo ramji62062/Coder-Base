@@ -295,7 +295,20 @@ function getDefaultShell() {
   if (process.platform === "win32") {
     return process.env.COMSPEC || "powershell.exe";
   }
-  return process.env.SHELL || "/bin/zsh" || "/bin/bash" || "/bin/sh";
+  // Probe for a valid shell binary — SHELL env may point to something that doesn't exist on this host
+  const candidates = [
+    process.env.SHELL,
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/bin/zsh",
+    "/usr/bin/zsh",
+    "/bin/sh",
+    "/usr/bin/sh",
+  ].filter(Boolean);
+  for (const sh of candidates) {
+    try { if (fs.existsSync(sh)) return sh; } catch {}
+  }
+  return "/bin/sh"; // ultimate fallback
 }
 
 /** @type {Map<string, { pty: any, terminalId: string, subscribers: Set<any>, outputBuffer: string, alive: boolean }>} */

@@ -197,6 +197,7 @@ export default function TerminalPanel({
 
     rt.fit.fit();
     rt.attached = true;
+    (rt as any)._lastAttachTime = Date.now();
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, attached: true } : t)));
 
     sendWs({
@@ -574,10 +575,35 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
             const tab = tabsRef.current.find((t) => t.terminalId === msg.terminalId);
             if (!tab) break;
             const rt = runtimesRef.current.get(tab.id);
+
+            // Track rapid exits to prevent infinite reconnect loops
+            // If the shell exits within 2 seconds of attach, it's a spawn failure
+            const now = Date.now();
+            const lastAttach = (rt as any)?._lastAttachTime || 0;
+            const rapidExit = now - lastAttach < 2000;
+            const prevFails = ((rt as any)?._rapidExitCount || 0);
+            const rapidExitCount = rapidExit ? prevFails + 1 : 0;
+
+            if (rt) {
+              (rt as any)._rapidExitCount = rapidExitCount;
+            }
+
+            if (rapidExitCount >= 3) {
+              // Stop retrying — server can't spawn a shell
+              rt?.term.writeln("\r\n\x1b[31m[Shell failed to start on the server]\x1b[0m");
+              rt?.term.writeln("\x1b[33mThe server environment does not have a compatible shell.\x1b[0m");
+              rt?.term.writeln("\x1b[33mUse the \"Local Terminal\" tab instead — click the Launch button to connect your own terminal.\x1b[0m");
+              rt?.term.writeln("\x1b[90m(Automatic reconnect stopped after 3 failed attempts)\x1b[0m");
+              if (rt) rt.attached = false;
+              setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, attached: false } : t)));
+              break;
+            }
+
             rt?.term.writeln("\r\n\x1b[90m[Shell exited — reconnecting…]\x1b[0m");
             if (rt) rt.attached = false;
             setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, attached: false } : t)));
-            setTimeout(() => { if (mountedRef.current) attachTerminal(tab.id, tab.terminalId); }, 600);
+            const delay = rapidExit ? Math.min(1000 * Math.pow(2, rapidExitCount), 5000) : 600;
+            setTimeout(() => { if (mountedRef.current) attachTerminal(tab.id, tab.terminalId); }, delay);
             break;
           }
         }
