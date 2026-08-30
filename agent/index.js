@@ -334,28 +334,37 @@ function spawnLocalPty(terminalId, cols = 80, rows = 24) {
   const shell = getDefaultShell();
   const args = process.platform === "win32" ? [] : ["--login"];
 
-  let child;
+  let child = null;
   if (nodePty) {
-    child = nodePty.spawn(shell, args, {
-      name: "xterm-256color",
-      cols: cols || 80,
-      rows: rows || 24,
+    try {
+      child = nodePty.spawn(shell, args, {
+        name: "xterm-256color",
+        cols: cols || 80,
+        rows: rows || 24,
+        cwd: WORKSPACE_DIR,
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          COLORTERM: "truecolor",
+          FORCE_COLOR: "1",
+        },
+      });
+    } catch (ptyErr) {
+      console.warn("[agent] node-pty spawn failed:", ptyErr.message, "- Falling back to child_process");
+      child = null;
+    }
+  }
+
+  if (!child) {
+    // Fallback using child_process.spawn
+    const { spawn } = require("child_process");
+    const fallbackArgs = process.platform === "win32" ? [] : ["-i"];
+    const proc = spawn(shell, fallbackArgs, {
       cwd: WORKSPACE_DIR,
       env: {
         ...process.env,
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
-        FORCE_COLOR: "1",
-      },
-    });
-  } else {
-    // Fallback using child_process.spawn
-    const { spawn } = require("child_process");
-    const proc = spawn(shell, args, {
-      cwd: WORKSPACE_DIR,
-      env: {
-        ...process.env,
-        TERM: "xterm-256color",
         FORCE_COLOR: "1",
       },
       stdio: ["pipe", "pipe", "pipe"],
