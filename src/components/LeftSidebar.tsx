@@ -375,8 +375,10 @@ export default function LeftSidebar(props: LeftSidebarProps) {
               ✕
             </button>
           </div>
-          <div className={`flex-1 overflow-hidden ${isAi ? "bg-black" : ""}`}>
-            {props.activePanel === "whiteboard" && <Whiteboard roomId={props.roomId} currentUserId={props.currentUserId} />}
+          <div className={`flex-1 overflow-hidden relative ${isAi ? "bg-black" : ""}`}>
+            <div className={props.activePanel === "whiteboard" ? "h-full w-full" : "hidden"}>
+              <Whiteboard roomId={props.roomId} currentUserId={props.currentUserId} />
+            </div>
             {props.activePanel === "ai" && (
               <AIAssistant
                 roomId={props.roomId}

@@ -7,6 +7,8 @@ import { basename, dirname, join, resolve, sep } from "path";
 import { Dirent, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 
+const terminalService = require("../../../../server/terminal-service.js");
+
 type WorkspaceFile = {
   name: string;
   path?: string;
@@ -194,11 +196,45 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { user } = await getAuthenticatedUser(req);
+    const { user, error: authError } = await getAuthenticatedUser(req);
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
     const userId = user?.id || clientIp;
 
-    const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false, signal } = await req.json();
+    const body = await req.json();
+    const { action, sessionId, command, args, data, code, language, cwd = "", files = [], activeFileName = "", rawInput = false, signal } = body;
+
+    if (action === "status") {
+      const dockerReady = await terminalService.checkDockerReady();
+      return NextResponse.json({ dockerReady });
+    }
+
+    if (action === "sync-files") {
+      const roomId = body.roomId;
+      const reset = Boolean(body.reset);
+      if (roomId && Array.isArray(files)) {
+        terminalService.syncFilesToWorkspace(roomId, files, reset);
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === "get-run-command") {
+      if (typeof code !== "string" || !language) {
+        return NextResponse.json({ error: "Code and language required." }, { status: 400 });
+      }
+      const roomId = body.roomId;
+      if (roomId && Array.isArray(files) && files.length > 0) {
+        terminalService.syncFilesToWorkspace(roomId, files);
+      }
+      const preferredFileName = activeFileName ? String(activeFileName).replace(/\\/g, "/").replace(/^\/+/, "") : undefined;
+      const effectiveLang = resolveCodeLanguage(language, code, preferredFileName ? basename(preferredFileName) : undefined);
+      const runnable = getRunnableFile(effectiveLang, code, preferredFileName);
+      return NextResponse.json({ execCmd: runnable.execCmd, fileName: runnable.fileName, language: effectiveLang });
+    }
+
+    // Interactive terminal actions require authentication
+    if (["start", "input", "signal", "output", "stop", "kill", "run-command"].includes(action) && !user) {
+      return NextResponse.json({ error: "Authentication required for terminal access." }, { status: 401 });
+    }
 
     if (action === "start") {
       const limit = checkRateLimit(`terminal:${userId}`, TERMINAL_LIMIT.max, TERMINAL_LIMIT.windowMs);

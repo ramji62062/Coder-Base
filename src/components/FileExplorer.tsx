@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { ChevronDown, ChevronRight, FilePlus, FolderPlus, File, Folder, FolderOpen, Edit, Trash2, Copy, Clipboard, Scissors, Save, Upload } from "lucide-react";
+import {
+  ChevronDown, ChevronRight, FilePlus, FolderPlus, File, Folder, FolderOpen,
+  Edit, Trash2, Copy, Clipboard, Scissors, Save, Upload, Terminal, Plus,
+  Columns2, Play,
+} from "lucide-react";
 
 export type FileItem = {
   name: string;
@@ -146,6 +150,7 @@ export default function FileExplorer({
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [openEditorsOpen, setOpenEditorsOpen] = useState(true);
   const [explorerOpen, setExplorerOpen] = useState(true);
+  const [terminalSectionOpen, setTerminalSectionOpen] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; isFolder: boolean } | null>(null);
   const [clipboardPath, setClipboardPath] = useState<{ path: string; cut: boolean } | null>(null);
   const [draggedPath, setDraggedPath] = useState<string | null>(null);

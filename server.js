@@ -1,7 +1,14 @@
+const { loadEnvConfig } = require("@next/env");
+loadEnvConfig(process.cwd());
+
 const { createServer } = require("http");
 const next = require("next");
 const { Server } = require("socket.io");
+const { WebSocketServer } = require("ws");
 const { createClient } = require("@supabase/supabase-js");
+const terminalService = require("./server/terminal-service");
+const ptyService = require("./server/pty-service");
+const lspService = require("./server/lsp-service");
 
 const dev = process.env.NODE_ENV !== "production";
 
@@ -94,7 +101,49 @@ function startServer(port) {
       path: "/api/socket",
     });
 
+    terminalService.startReliabilityLoops();
+    terminalService.checkDockerReady().then((ready) => {
+      console.log(`[terminal] Docker sandbox ${ready ? "ready" : "unavailable"}`);
+    });
+
+    // The editor/collab channel (socket.io) keeps only control + file-sync
+    // notifications. The raw terminal byte stream and LSP JSON-RPC live on
+    // their own dedicated WebSocket channels (see below).
+    ptyService.setActiveIo(io);
+
+    // Dedicated WebSocket server for the terminal + LSP channels. Each gets its
+    // own path so the two never share a message handler or transport pipe.
+    const wss = new WebSocketServer({ noServer: true });
+    wss.on("connection", (ws, req) => {
+      const pathname = new URL(req.url, "http://localhost").pathname;
+      if (pathname === "/ws/terminal") ptyService.handleConnection(ws);
+      else if (pathname === "/ws/lsp") lspService.handleConnection(ws, req);
+      else ws.close();
+    });
+    httpServer.on("upgrade", (req, socket, head) => {
+      const pathname = new URL(req.url, "http://localhost").pathname;
+      if (pathname === "/ws/terminal" || pathname === "/ws/lsp") {
+        wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      }
+      // All other upgrade requests (socket.io on /api/socket) are left for
+      // socket.io's own upgrade handler to process.
+    });
+
     io.on("connection", (socket) => {
+      const { inc, setGauge, recordError } = require("./server/metrics");
+      inc("ws_connects");
+      if (socket.recovered) inc("ws_reconnects_recovered");
+      setGauge("ws_connected", io.engine.clientsCount);
+      socket.on("disconnect", (reason) => {
+        inc("ws_disconnects");
+        setGauge("ws_connected", io.engine.clientsCount);
+        if (reason !== "transport close" && reason !== "ping timeout") {
+          recordError("ws_disconnect_abnormal", reason);
+        }
+      });
+
+      terminalService.wireSocketIo(io, socket);
+
       socket.on("call:join", async (payload = {}) => {
         const roomId = String(payload.roomId || "default");
         if (!(await roomExists(roomId))) {

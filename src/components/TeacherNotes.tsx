@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { BookOpen, Download, Send, Pin, PinOff, Trash2, Plus, Eye, Edit3, Copy, Check, Globe, Image, Bold, Italic, Underline, Strikethrough, Code, Type, List, ListOrdered, Quote, Minimize2, Maximize2, RotateCcw, Scissors, Copy as CopyIcon, Edit3 as EditIcon, Trash2 as TrashIcon, Link as LinkIcon, Heading1, Heading2, Heading3, AlignLeft, AlignCenter, AlignRight, Undo2, Redo2 } from "lucide-react";
+import {
+  BookOpen, Download, Send, Pin, PinOff, Trash2, Plus, Eye, Edit3, Copy, Check,
+  Globe, Image, Bold, Italic, Underline, Strikethrough, Code, Type, List,
+  ListOrdered, Quote, Minimize2, Maximize2, RotateCcw, Scissors, Copy as CopyIcon,
+  Edit3 as EditIcon, Trash2 as TrashIcon, Link as LinkIcon, Heading1, Heading2,
+  Heading3, AlignLeft, AlignCenter, AlignRight, Undo2, Redo2, FlipHorizontal,
+  FlipVertical, RotateCw, Sun, Contrast, Sliders, Sparkles
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type Note = {
@@ -48,6 +55,12 @@ type ImageBlock = {
   x: number;
   y: number;
   rotation: number;
+  flipH?: boolean;
+  flipV?: boolean;
+  filter?: "none" | "grayscale" | "sepia" | "invert" | "blur" | "brightness" | "contrast";
+  opacity?: number;
+  borderRadius?: number;
+  shadow?: boolean;
 };
 
 interface TeacherNotesProps {
@@ -527,23 +540,58 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
     }
   };
 
-  const handleImageAction = (action: string, image: ImageBlock) => {
+  const handleImageAction = (action: string, image: ImageBlock, value?: any) => {
     switch (action) {
-      case "minimize":
-        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 50, height: 50 } : img)));
+      case "size-small":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 160, height: 120 } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, width: 160, height: 120 } : prev);
         break;
-      case "maximize":
+      case "size-medium":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 320, height: 240 } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, width: 320, height: 240 } : prev);
+        break;
+      case "size-full":
         setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, width: 600, height: 400 } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, width: 600, height: 400 } : prev);
+        break;
+      case "rotate-right":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, rotation: (img.rotation + 90) % 360 } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, rotation: (prev.rotation + 90) % 360 } : prev);
+        break;
+      case "rotate-left":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, rotation: (img.rotation - 90 + 360) % 360 } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, rotation: (prev.rotation - 90 + 360) % 360 } : prev);
+        break;
+      case "flip-h":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, flipH: !img.flipH } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, flipH: !prev.flipH } : prev);
+        break;
+      case "flip-v":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, flipV: !img.flipV } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, flipV: !prev.flipV } : prev);
+        break;
+      case "set-filter":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, filter: value } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, filter: value } : prev);
+        break;
+      case "set-radius":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, borderRadius: value } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, borderRadius: value } : prev);
+        break;
+      case "toggle-shadow":
+        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, shadow: !img.shadow } : img)));
+        setSelectedImage((prev) => prev?.id === image.id ? { ...prev, shadow: !prev.shadow } : prev);
         break;
       case "copy":
         navigator.clipboard.writeText(`![${image.alt}](${image.src})`);
         break;
-      case "rotate":
-        setImages((prev) => prev.map((img) => (img.id === image.id ? { ...img, rotation: (img.rotation + 90) % 360 } : img)));
+      case "download": {
+        const link = document.createElement("a");
+        link.download = `${image.alt || "note-image"}.png`;
+        link.href = image.src;
+        link.click();
         break;
-      case "edit":
-        setSelectedImage(image);
-        break;
+      }
       case "delete":
         setImages((prev) => prev.filter((img) => img.id !== image.id));
         const newContent = editContent.replace(`![${image.alt}](${image.src})`, "");
@@ -736,26 +784,82 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
               </div>
             </div>
 
-            {/* Image Controls Overlay */}
+            {/* Image Studio Modal */}
             {selectedImage && !preview && (
-              <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                <div className="bg-ct-dark-black border border-white/20 rounded-xl p-4 w-full max-w-md flex flex-col gap-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-white">Image Controls</h3>
-                    <button onClick={() => setSelectedImage(null)} className="text-gray-500 hover:text-white">✕</button>
+              <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-[#141416] border border-white/20 rounded-2xl p-5 w-full max-w-lg shadow-[0_25px_60px_rgba(0,0,0,0.9)] flex flex-col gap-4 text-xs select-none">
+                  {/* Top Bar */}
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <span className="font-bold text-white text-sm flex items-center gap-2">
+                      <Image size={15} className="text-sky-400" />
+                      <span>Note Image Studio</span>
+                    </span>
+                    <button onClick={() => setSelectedImage(null)} className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10">✕</button>
                   </div>
-                  <img 
-                    src={selectedImage.src} 
-                    alt={selectedImage.alt} 
-                    className="max-w-full max-h-64 mx-auto rounded-lg border border-white/10"
-                    style={{ transform: `rotate(${selectedImage.rotation}deg)` }}
-                  />
-                  <div className="flex flex-wrap gap-2 justify-center">
-                    <button onClick={() => handleImageAction("minimize", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20">Minimize</button>
-                    <button onClick={() => handleImageAction("maximize", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20">Maximize</button>
-                    <button onClick={() => handleImageAction("copy", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20"><CopyIcon size={12} className="inline" /> Copy</button>
-                    <button onClick={() => handleImageAction("rotate", selectedImage)} className="px-3 py-1.5 bg-white/10 border border-white/20 rounded text-white text-xs hover:bg-white/20"><RotateCcw size={12} className="inline" /> Rotate</button>
-                    <button onClick={() => handleImageAction("delete", selectedImage)} className="px-3 py-1.5 bg-red-500/20 border border-red-500/40 rounded text-red-400 text-xs hover:bg-red-500/30"><TrashIcon size={12} className="inline" /> Delete</button>
+
+                  {/* Live Image Preview */}
+                  <div className="flex items-center justify-center min-h-[180px] max-h-64 bg-black/60 rounded-xl p-4 border border-white/10 overflow-hidden relative">
+                    <img 
+                      src={selectedImage.src} 
+                      alt={selectedImage.alt} 
+                      className="max-w-full max-h-56 object-contain transition-all duration-200"
+                      style={{
+                        transform: `rotate(${selectedImage.rotation}deg) scaleX(${selectedImage.flipH ? -1 : 1}) scaleY(${selectedImage.flipV ? -1 : 1})`,
+                        filter: selectedImage.filter === "grayscale" ? "grayscale(100%)"
+                          : selectedImage.filter === "sepia" ? "sepia(100%)"
+                          : selectedImage.filter === "invert" ? "invert(100%)"
+                          : selectedImage.filter === "blur" ? "blur(3px)"
+                          : selectedImage.filter === "brightness" ? "brightness(135%)"
+                          : selectedImage.filter === "contrast" ? "contrast(150%)"
+                          : "none",
+                        borderRadius: `${selectedImage.borderRadius ?? 8}px`,
+                        boxShadow: selectedImage.shadow ? "0 12px 32px rgba(0,0,0,0.7)" : "none",
+                        opacity: selectedImage.opacity ?? 1,
+                      }}
+                    />
+                  </div>
+
+                  {/* Sizing & Transform */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
+                      <button onClick={() => handleImageAction("size-small", selectedImage)} className="px-2.5 py-1 rounded hover:bg-white/15 text-[11px] text-gray-200">Small</button>
+                      <button onClick={() => handleImageAction("size-medium", selectedImage)} className="px-2.5 py-1 rounded hover:bg-white/15 text-[11px] text-gray-200">Medium</button>
+                      <button onClick={() => handleImageAction("size-full", selectedImage)} className="px-2.5 py-1 rounded hover:bg-white/15 text-[11px] text-gray-200">Full</button>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
+                      <button onClick={() => handleImageAction("rotate-left", selectedImage)} title="Rotate Left (-90°)" className="p-1.5 rounded hover:bg-white/15 text-gray-200"><RotateCcw size={13}/></button>
+                      <button onClick={() => handleImageAction("rotate-right", selectedImage)} title="Rotate Right (+90°)" className="p-1.5 rounded hover:bg-white/15 text-gray-200"><RotateCw size={13}/></button>
+                      <button onClick={() => handleImageAction("flip-h", selectedImage)} title="Flip Horizontal" className={`p-1.5 rounded hover:bg-white/15 ${selectedImage.flipH ? "bg-sky-500/30 text-sky-300" : "text-gray-200"}`}><FlipHorizontal size={13}/></button>
+                      <button onClick={() => handleImageAction("flip-v", selectedImage)} title="Flip Vertical" className={`p-1.5 rounded hover:bg-white/15 ${selectedImage.flipV ? "bg-sky-500/30 text-sky-300" : "text-gray-200"}`}><FlipVertical size={13}/></button>
+                    </div>
+                  </div>
+
+                  {/* Visual Filters */}
+                  <div className="flex flex-wrap items-center gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "none")} className={`px-2 py-1 rounded text-[10px] ${!selectedImage.filter || selectedImage.filter === "none" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Norm</button>
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "grayscale")} className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "grayscale" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>B&W</button>
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "sepia")} className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "sepia" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Sepia</button>
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "invert")} className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "invert" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Invert</button>
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "brightness")} className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "brightness" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Bright</button>
+                    <button onClick={() => handleImageAction("set-filter", selectedImage, "contrast")} className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "contrast" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Contrast</button>
+                  </div>
+
+                  {/* Corner Radius & Shadow */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleImageAction("set-radius", selectedImage, 0)} className={`px-2 py-1 rounded text-[10px] ${!selectedImage.borderRadius ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Square</button>
+                      <button onClick={() => handleImageAction("set-radius", selectedImage, 12)} className={`px-2 py-1 rounded text-[10px] ${selectedImage.borderRadius === 12 ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Rounded</button>
+                      <button onClick={() => handleImageAction("set-radius", selectedImage, 28)} className={`px-2 py-1 rounded text-[10px] ${selectedImage.borderRadius === 28 ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Pill</button>
+                      <button onClick={() => handleImageAction("toggle-shadow", selectedImage)} className={`px-2 py-1 rounded text-[10px] ${selectedImage.shadow ? "bg-sky-500/30 text-sky-300 font-bold" : "text-gray-300"}`}>Shadow</button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleImageAction("copy", selectedImage)} title="Copy Markdown" className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-gray-200"><CopyIcon size={13}/></button>
+                      <button onClick={() => handleImageAction("download", selectedImage)} title="Download Image" className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-gray-200"><Download size={13}/></button>
+                      <button onClick={() => handleImageAction("delete", selectedImage)} title="Delete Image" className="p-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400"><TrashIcon size={13}/></button>
+                      <button onClick={() => setSelectedImage(null)} className="px-3 py-1 bg-white text-black font-bold rounded-lg hover:bg-gray-200 text-xs ml-1">Done</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -786,10 +890,26 @@ export default function TeacherNotes({ roomId, currentUserId, currentUserName, i
                 {images.length > 0 && (
                   <div className="flex flex-wrap gap-2 p-3 border-t border-[#222]">
                     {images.map((img) => (
-                      <div key={img.id} className="relative group cursor-pointer" onClick={() => setSelectedImage(img)}>
-                        <img src={img.src} alt={img.alt}
-                          className="w-20 h-20 object-cover rounded-lg border border-white/10 hover:border-white/40 transition-colors" />
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white text-center py-0.5 rounded-b-lg truncate px-1">{img.alt}</div>
+                      <div key={img.id} className="relative group cursor-pointer p-1 rounded-xl hover:bg-white/5 transition-colors" onClick={() => setSelectedImage(img)}>
+                        <img
+                          src={img.src}
+                          alt={img.alt}
+                          className="w-20 h-20 object-cover border border-white/10 group-hover:border-sky-400 transition-all"
+                          style={{
+                            transform: `rotate(${img.rotation}deg) scaleX(${img.flipH ? -1 : 1}) scaleY(${img.flipV ? -1 : 1})`,
+                            filter: img.filter === "grayscale" ? "grayscale(100%)"
+                              : img.filter === "sepia" ? "sepia(100%)"
+                              : img.filter === "invert" ? "invert(100%)"
+                              : img.filter === "blur" ? "blur(2px)"
+                              : img.filter === "brightness" ? "brightness(135%)"
+                              : img.filter === "contrast" ? "contrast(150%)"
+                              : "none",
+                            borderRadius: `${img.borderRadius ?? 8}px`,
+                            boxShadow: img.shadow ? "0 4px 12px rgba(0,0,0,0.5)" : "none",
+                            opacity: img.opacity ?? 1,
+                          }}
+                        />
+                        <div className="absolute bottom-1 left-1 right-1 bg-black/80 text-[9px] text-gray-200 text-center py-0.5 rounded-b-lg truncate px-1">{img.alt}</div>
                       </div>
                     ))}
                   </div>

@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Square, Circle, Minus, Type, Eraser, Trash2, Download, Undo2, Redo2, MousePointer2, ArrowUpRight, Hand, Sparkles, Box, RotateCcw, Image as ImageIcon, Upload, Copy, Trash2 as TrashIcon, Minimize2, Maximize2, RotateCcw as RotateIcon, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Pencil, Square, Circle, Minus, Type, Eraser, Trash2, Download, Undo2, Redo2,
+  MousePointer2, ArrowUpRight, Hand, Sparkles, Box, RotateCcw, Image as ImageIcon,
+  Upload, Copy, Trash2 as TrashIcon, Minimize2, Maximize2, RotateCcw as RotateIcon,
+  ZoomIn, ZoomOut, FlipHorizontal, FlipVertical, RotateCw, Layers, Sun, Contrast, Sliders
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type ToolType = "select" | "pen" | "eraser" | "line" | "arrow" | "rect" | "circle" | "text" | "pan" | "image";
@@ -13,6 +18,11 @@ interface WbElement {
   color: string; lineWidth: number;
   text?: string; fontSize?: number; fontFamily?: string;
   src?: string; alt?: string; rotation?: number;
+  flipH?: boolean; flipV?: boolean;
+  filter?: "none" | "grayscale" | "sepia" | "invert" | "blur" | "brightness" | "contrast";
+  opacity?: number;
+  borderRadius?: number;
+  shadow?: boolean;
 }
 
 interface WhiteboardProps { roomId: string; currentUserId: string; }
@@ -119,8 +129,42 @@ function drawEl(ctx: CanvasRenderingContext2D, el: WbElement, selected = false, 
     }
     if (img.complete) {
       ctx.save();
+      if (el.opacity !== undefined) ctx.globalAlpha = el.opacity;
+      
+      // Filters
+      if (el.filter === "grayscale") ctx.filter = "grayscale(100%)";
+      else if (el.filter === "sepia") ctx.filter = "sepia(100%)";
+      else if (el.filter === "invert") ctx.filter = "invert(100%)";
+      else if (el.filter === "blur") ctx.filter = "blur(3px)";
+      else if (el.filter === "brightness") ctx.filter = "brightness(135%)";
+      else if (el.filter === "contrast") ctx.filter = "contrast(150%)";
+
+      // Shadow
+      if (el.shadow) {
+        ctx.shadowColor = "rgba(0,0,0,0.65)";
+        ctx.shadowBlur = 16;
+        ctx.shadowOffsetX = 4;
+        ctx.shadowOffsetY = 6;
+      }
+
       ctx.translate(el.x! + el.w! / 2, el.y! + el.h! / 2);
       ctx.rotate((el.rotation || 0) * Math.PI / 180);
+      ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1);
+
+      // Border radius clipping
+      if (el.borderRadius && el.borderRadius > 0) {
+        const r = Math.min(el.borderRadius, el.w! / 2, el.h! / 2);
+        ctx.beginPath();
+        const rx = -el.w! / 2, ry = -el.h! / 2, rw = el.w!, rh = el.h!;
+        ctx.moveTo(rx + r, ry);
+        ctx.arcTo(rx + rw, ry, rx + rw, ry + rh, r);
+        ctx.arcTo(rx + rw, ry + rh, rx, ry + rh, r);
+        ctx.arcTo(rx, ry + rh, rx, ry, r);
+        ctx.arcTo(rx, ry, rx + rw, ry, r);
+        ctx.closePath();
+        ctx.clip();
+      }
+
       ctx.drawImage(img, -el.w! / 2, -el.h! / 2, el.w!, el.h!);
       ctx.restore();
     } else {
@@ -128,9 +172,27 @@ function drawEl(ctx: CanvasRenderingContext2D, el: WbElement, selected = false, 
       ctx.fillRect(el.x!, el.y!, el.w!, el.h!);
     }
     if (selected) {
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
-      ctx.strokeRect(el.x!, el.y!, el.w!, el.h!);
+      ctx.save();
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(el.x! - 2, el.y! - 2, el.w! + 4, el.h! + 4);
+      // Corner resize handles
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#0284c7";
+      ctx.lineWidth = 2;
       ctx.setLineDash([]);
+      const corners = [
+        [el.x! - 4, el.y! - 4],
+        [el.x! + el.w! - 4, el.y! - 4],
+        [el.x! - 4, el.y! + el.h! - 4],
+        [el.x! + el.w! - 4, el.y! + el.h! - 4]
+      ];
+      corners.forEach(([cx, cy]) => {
+        ctx.fillRect(cx, cy, 8, 8);
+        ctx.strokeRect(cx, cy, 8, 8);
+      });
+      ctx.restore();
     }
   } else if (el.type === "text" && el.text) {
     ctx.font = `${el.fontSize || 18}px "${el.fontFamily || "Inter"}", sans-serif`;
@@ -232,9 +294,26 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [elements, setElements] = useState<WbElement[]>([]);
+  const [elements, setElements] = useState<WbElement[]>(() => {
+    if (typeof window !== "undefined" && roomId) {
+      try {
+        const stored = localStorage.getItem(`wb_${roomId}`);
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return [];
+  });
+
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
-  const [history, setHistory] = useState<WbElement[][]>([[]]);
+  const [history, setHistory] = useState<WbElement[][]>(() => {
+    if (typeof window !== "undefined" && roomId) {
+      try {
+        const stored = localStorage.getItem(`wb_${roomId}`);
+        if (stored) return [JSON.parse(stored)];
+      } catch {}
+    }
+    return [[]];
+  });
   const [historyIndex, setHistoryIndex] = useState(0);
   const [redoStack, setRedoStack] = useState<WbElement[][]>([]);
   const [tool, setTool] = useState<ToolType>("pen");
@@ -270,7 +349,14 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
   const elementsRef = useRef(elements);
   const isSavingHistory = useRef(false);
 
-  useEffect(() => { elementsRef.current = elements; }, [elements]);
+  useEffect(() => {
+    elementsRef.current = elements;
+    if (typeof window !== "undefined" && roomId) {
+      try {
+        localStorage.setItem(`wb_${roomId}`, JSON.stringify(elements));
+      } catch {}
+    }
+  }, [elements, roomId]);
 
   const pushHistory = useCallback((newEls: WbElement[]) => {
     if (isSavingHistory.current) return;
@@ -289,8 +375,9 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     if (historyIndex > 0) {
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
-      setElements(history[newIndex]);
-      broadcastEls(history[newIndex]);
+      const nextEls = history[newIndex] || [];
+      setElements(nextEls);
+      broadcastEls(nextEls);
     }
   };
 
@@ -298,8 +385,9 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     if (historyIndex < history.length - 1) {
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
-      setElements(history[newIndex]);
-      broadcastEls(history[newIndex]);
+      const nextEls = history[newIndex] || [];
+      setElements(nextEls);
+      broadcastEls(nextEls);
     }
   };
 
@@ -310,17 +398,45 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
 
     channel
       .on("broadcast", { event: "wb-update" }, ({ payload }: { payload: { elements: WbElement[] } }) => {
-        setElements(payload.elements);
-        pushHistory(payload.elements);
+        if (Array.isArray(payload.elements)) {
+          setElements(payload.elements);
+          pushHistory(payload.elements);
+        }
       })
       .on("broadcast", { event: "wb-add-elements" }, ({ payload }: { payload: { elements: WbElement[] } }) => {
-        setElements((prev) => {
-          const next = [...prev, ...payload.elements];
-          pushHistory(next);
-          return next;
-        });
+        if (Array.isArray(payload.elements)) {
+          setElements((prev) => {
+            const next = [...prev, ...payload.elements];
+            pushHistory(next);
+            return next;
+          });
+        }
       })
-      .subscribe();
+      .on("broadcast", { event: "wb-request-sync" }, () => {
+        if (elementsRef.current && elementsRef.current.length > 0) {
+          channel.send({
+            type: "broadcast",
+            event: "wb-sync-response",
+            payload: { elements: elementsRef.current },
+          });
+        }
+      })
+      .on("broadcast", { event: "wb-sync-response" }, ({ payload }: { payload: { elements: WbElement[] } }) => {
+        if (Array.isArray(payload.elements) && payload.elements.length > 0) {
+          setElements((prev) => {
+            if (prev.length === 0) {
+              pushHistory(payload.elements);
+              return payload.elements;
+            }
+            return prev;
+          });
+        }
+      })
+      .subscribe((status: string) => {
+        if (status === "SUBSCRIBED") {
+          channel.send({ type: "broadcast", event: "wb-request-sync", payload: {} });
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [roomId, pushHistory]);
@@ -610,30 +726,103 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
     }
   };
 
-  const handleImageAction = (action: string) => {
+  const handleImageAction = (action: string, value?: any) => {
     if (!selectedImage) return;
     const img = selectedImage;
     switch (action) {
-      case "minimize": {
-        const nextImage = { ...img, w: 80, h: 80 };
-        setSelectedImage(nextImage);
-        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+      case "size-small": {
+        const next = { ...img, w: 160, h: 120 };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
         break;
       }
-      case "maximize": {
-        const nextImage = { ...img, w: 600, h: 400 };
-        setSelectedImage(nextImage);
-        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+      case "size-medium": {
+        const next = { ...img, w: 320, h: 240 };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
         break;
       }
-      case "copy": navigator.clipboard.writeText(`!${img.alt}(${img.src})`); break;
-      case "rotate": {
-        const nextImage = { ...img, rotation: ((img.rotation ?? 0) + 90) % 360 };
-        setSelectedImage(nextImage);
-        pushState(elements.map(el => el.id === img.id ? nextImage : el));
+      case "size-large": {
+        const next = { ...img, w: 560, h: 380 };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
         break;
       }
-      case "delete": { const next = elements.filter(el => el.id !== img.id); pushState(next); setSelectedId(null); setSelectedImage(null); break; }
+      case "rotate-right": {
+        const next = { ...img, rotation: ((img.rotation ?? 0) + 90) % 360 };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "rotate-left": {
+        const next = { ...img, rotation: ((img.rotation ?? 0) - 90 + 360) % 360 };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "flip-h": {
+        const next = { ...img, flipH: !img.flipH };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "flip-v": {
+        const next = { ...img, flipV: !img.flipV };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "set-filter": {
+        const next = { ...img, filter: value };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "set-opacity": {
+        const next = { ...img, opacity: value };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "set-radius": {
+        const next = { ...img, borderRadius: value };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "toggle-shadow": {
+        const next = { ...img, shadow: !img.shadow };
+        setSelectedImage(next);
+        pushState(elements.map(el => el.id === img.id ? next : el));
+        break;
+      }
+      case "duplicate": {
+        const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const next: WbElement = { ...img, id, x: (img.x ?? 0) + 24, y: (img.y ?? 0) + 24 };
+        pushState([...elements, next]);
+        setSelectedId(id);
+        setSelectedImage(next);
+        break;
+      }
+      case "copy": {
+        navigator.clipboard.writeText(`![${img.alt || "image"}](${img.src})`);
+        break;
+      }
+      case "download": {
+        if (!img.src) break;
+        const link = document.createElement("a");
+        link.download = img.alt || "whiteboard-image.png";
+        link.href = img.src;
+        link.click();
+        break;
+      }
+      case "delete": {
+        const next = elements.filter(el => el.id !== img.id);
+        pushState(next);
+        setSelectedId(null);
+        setSelectedImage(null);
+        break;
+      }
     }
   };
 
@@ -787,15 +976,59 @@ export default function Whiteboard({ roomId, currentUserId }: WhiteboardProps) {
           </div>
         </div>
 
-        {/* Selected Image Controls */}
+        {/* Selected Image Studio */}
         {selectedImage && (
-          <div className="fixed bottom-20 right-4 z-40 bg-black/90 border border-white/20 rounded-xl p-3 flex items-center gap-2 shadow-xl">
-            <button onClick={() => handleImageAction("minimize")} title="Minimize" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Minimize2 size={14}/></button>
-            <button onClick={() => handleImageAction("maximize")} title="Maximize" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Maximize2 size={14}/></button>
-            <button onClick={() => handleImageAction("copy")} title="Copy" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><Copy size={14}/></button>
-            <button onClick={() => handleImageAction("rotate")} title="Rotate" className="p-2 rounded bg-white/10 hover:bg-white/20 text-white"><RotateIcon size={14}/></button>
-            <button onClick={() => handleImageAction("delete")} title="Delete" className="p-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400"><TrashIcon size={14}/></button>
-            <button onClick={() => { setSelectedImage(null); setSelectedId(null); }} className="p-2 rounded bg-white/10 hover:bg-white/20 text-white ml-2">Done</button>
+          <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-40 bg-[#141416]/95 backdrop-blur-md border border-white/20 rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.8)] flex flex-col gap-2.5 max-w-[95vw] md:max-w-2xl text-xs select-none animate-in fade-in zoom-in-95 duration-150">
+            {/* Header & Size Presets */}
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+              <span className="text-[11px] font-bold text-white flex items-center gap-1.5 truncate">
+                <ImageIcon size={13} className="text-sky-400" />
+                <span>Image Studio</span>
+                <span className="text-[10px] text-gray-400 font-normal">({selectedImage.w}×{selectedImage.h}px)</span>
+              </span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => handleImageAction("size-small")} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-200 font-medium">Small</button>
+                <button onClick={() => handleImageAction("size-medium")} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-200 font-medium">Medium</button>
+                <button onClick={() => handleImageAction("size-large")} className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[10px] text-gray-200 font-medium">Large</button>
+                <button onClick={() => { setSelectedImage(null); setSelectedId(null); }} className="px-2 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-semibold text-[10px] ml-1">Done</button>
+              </div>
+            </div>
+
+            {/* Transform & Style Controls */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {/* Rotation & Flip */}
+              <div className="flex items-center bg-white/5 rounded-lg p-0.5 border border-white/10">
+                <button onClick={() => handleImageAction("rotate-left")} title="Rotate Left (-90°)" className="p-1.5 rounded hover:bg-white/20 text-gray-200"><RotateCcw size={13}/></button>
+                <button onClick={() => handleImageAction("rotate-right")} title="Rotate Right (+90°)" className="p-1.5 rounded hover:bg-white/20 text-gray-200"><RotateCw size={13}/></button>
+                <button onClick={() => handleImageAction("flip-h")} title="Flip Horizontal" className={`p-1.5 rounded hover:bg-white/20 ${selectedImage.flipH ? "bg-sky-500/30 text-sky-300" : "text-gray-200"}`}><FlipHorizontal size={13}/></button>
+                <button onClick={() => handleImageAction("flip-v")} title="Flip Vertical" className={`p-1.5 rounded hover:bg-white/20 ${selectedImage.flipV ? "bg-sky-500/30 text-sky-300" : "text-gray-200"}`}><FlipVertical size={13}/></button>
+              </div>
+
+              {/* Filters */}
+              <div className="flex items-center bg-white/5 rounded-lg p-0.5 border border-white/10">
+                <button onClick={() => handleImageAction("set-filter", "none")} title="Normal" className={`px-2 py-1 rounded text-[10px] ${!selectedImage.filter || selectedImage.filter === "none" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Norm</button>
+                <button onClick={() => handleImageAction("set-filter", "grayscale")} title="Grayscale (B&W)" className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "grayscale" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>B&W</button>
+                <button onClick={() => handleImageAction("set-filter", "sepia")} title="Sepia (Warm Vintage)" className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "sepia" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Sepia</button>
+                <button onClick={() => handleImageAction("set-filter", "invert")} title="Invert (Dark Mode)" className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "invert" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Invert</button>
+                <button onClick={() => handleImageAction("set-filter", "brightness")} title="Brightness Boost" className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "brightness" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Bright</button>
+                <button onClick={() => handleImageAction("set-filter", "contrast")} title="High Contrast" className={`px-2 py-1 rounded text-[10px] ${selectedImage.filter === "contrast" ? "bg-white text-black font-bold" : "text-gray-300 hover:text-white"}`}>Contrast</button>
+              </div>
+
+              {/* Corners & Shadow */}
+              <div className="flex items-center bg-white/5 rounded-lg p-0.5 border border-white/10">
+                <button onClick={() => handleImageAction("set-radius", 0)} title="Square Corners" className={`px-2 py-1 rounded text-[10px] ${!selectedImage.borderRadius ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Sharp</button>
+                <button onClick={() => handleImageAction("set-radius", 14)} title="Rounded Corners" className={`px-2 py-1 rounded text-[10px] ${selectedImage.borderRadius === 14 ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Round</button>
+                <button onClick={() => handleImageAction("set-radius", 28)} title="Pill Rounded" className={`px-2 py-1 rounded text-[10px] ${selectedImage.borderRadius === 28 ? "bg-white/20 text-white font-bold" : "text-gray-300"}`}>Pill</button>
+                <button onClick={() => handleImageAction("toggle-shadow")} title="Drop Shadow" className={`px-2 py-1 rounded text-[10px] ${selectedImage.shadow ? "bg-sky-500/30 text-sky-300 font-bold" : "text-gray-300"}`}>Shadow</button>
+              </div>
+
+              {/* Duplicate, Download, Delete */}
+              <div className="flex items-center ml-auto gap-1">
+                <button onClick={() => handleImageAction("duplicate")} title="Duplicate Image" className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-gray-200"><Copy size={13}/></button>
+                <button onClick={() => handleImageAction("download")} title="Download Image" className="p-1.5 rounded bg-white/10 hover:bg-white/20 text-gray-200"><Download size={13}/></button>
+                <button onClick={() => handleImageAction("delete")} title="Delete Image" className="p-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400"><TrashIcon size={13}/></button>
+              </div>
+            </div>
           </div>
         )}
 

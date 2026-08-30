@@ -15,7 +15,9 @@ import ParticipantsCallPanel from "@/components/ParticipantsCallPanel";
 import { type FileItem } from "@/components/FileExplorer";
 import { supabase } from "@/lib/supabase";
 import { type RemoteCursor } from "@/components/Editor";
-import { Eye, Play } from "lucide-react";
+import { Play, ShieldAlert, FolderDown, Download, AlertTriangle, X, Check, FileArchive } from "lucide-react";
+import { localAgentClient } from "@/lib/local-agent-client";
+import { downloadProjectZip } from "@/lib/export-project";
 
 type Room = {
   id: string;
@@ -97,168 +99,6 @@ function getParentDirectory(path: string) {
   return parts.join("/");
 }
 
-function resolvePreviewPath(basePath: string, relativePath: string) {
-  const rel = normalizePath(relativePath.replace(/^\//, ""));
-  const baseDir = getParentDirectory(basePath);
-  return normalizePath([baseDir, rel].filter(Boolean).join("/"));
-}
-
-function getPreviewHtmlFile(files: FileItem[], activeFile: string) {
-  const fileMap = new Map(files.map((file) => [normalizePath(file.path || file.name), file]));
-  const activeKey = normalizePath(activeFile);
-  const activeFileItem = fileMap.get(activeKey);
-
-  if (activeFileItem?.language === "html") {
-    return activeFileItem;
-  }
-
-  return fileMap.get("index.html")
-    || fileMap.get("index.htm")
-    || Array.from(fileMap.values()).find((file) => file.language === "html");
-}
-
-function buildProjectPreview(files: FileItem[]): string {
-  const htmlFile = files.find(f => f.name === "index.html" || f.language === "html");
-  if (!htmlFile) {
-    return `<html><body style="font-family:sans-serif;padding:40px;background:#fff">
-      <h2>No HTML file found</h2>
-      <p>Create an index.html file to preview your project.</p>
-    </body></html>`;
-  }
-  
-  const cssFiles = files.filter(f => f.language === "css");
-  const jsFiles = files.filter(f => f.language === "javascript");
-  
-  let html = htmlFile.content || "";
-  
-  const cssMap = new Map(cssFiles.map(f => [f.name, f.content || ""]));
-  const jsMap = new Map(jsFiles.map(f => [f.name, f.content || ""]));
-  
-  html = html.replace(/<link[^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
-    if (href.endsWith(".css")) {
-      const css = cssMap.get(href) || cssMap.get(href.replace("./", ""));
-      if (css) return `<style>${css}</style>`;
-    }
-    return match;
-  });
-  
-  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
-    if (src.endsWith(".js")) {
-      const js = jsMap.get(src) || jsMap.get(src.replace("./", ""));
-      if (js) return `<script>${js}</script>`;
-    }
-    return match;
-  });
-  
-  if (!/<meta[^>]*charset/i.test(html)) {
-    html = html.replace(/<head/i, '<head><meta charset="UTF-8">');
-  }
-  
-  return html;
-}
-
-function buildFolderPreview(files: FileItem[], folderName: string): string {
-  const folderFiles = files.filter(f => f.name.startsWith(folderName) || (f.path && f.path.includes(folderName)));
-  const htmlFile = folderFiles.find(f => f.language === "html");
-  
-  if (!htmlFile) {
-    return `<html><body style="font-family:sans-serif;padding:40px;background:#fff">
-      <h2>No HTML file in "${folderName}"</h2>
-      <p>Add an HTML file to this folder to preview it.</p>
-    </body></html>`;
-  }
-  
-  const cssFiles = folderFiles.filter(f => f.language === "css");
-  const jsFiles = folderFiles.filter(f => f.language === "javascript");
-  
-  let html = htmlFile.content || "";
-  
-  const cssMap = new Map(cssFiles.map(f => [f.name, f.content || ""]));
-  const jsMap = new Map(jsFiles.map(f => [f.name, f.content || ""]));
-  
-  html = html.replace(/<link[^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
-    if (href.endsWith(".css")) {
-      const css = cssMap.get(href) || cssMap.get(href.replace("./", ""));
-      if (css) return `<style>${css}</style>`;
-    }
-    return match;
-  });
-  
-  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
-    if (src.endsWith(".js")) {
-      const js = jsMap.get(src) || jsMap.get(src.replace("./", ""));
-      if (js) return `<script>${js}</script>`;
-    }
-    return match;
-  });
-  
-  if (!/<meta[^>]*charset/i.test(html)) {
-    html = html.replace(/<head/i, '<head><meta charset="UTF-8">');
-  }
-  
-  return html;
-}
-
-function buildPreviewSrcDoc(files: FileItem[], activeFile: string) {
-  const htmlFile = getPreviewHtmlFile(files, activeFile);
-
-  if (!htmlFile || htmlFile.language !== "html") {
-    return "";
-  }
-
-  const fileMap = new Map(files.map((file) => [normalizePath(file.path || file.name), file]));
-  let html = htmlFile.content || "";
-
-  const cssMap = new Map(
-    Array.from(fileMap.values())
-      .filter((file) => file.language === "css")
-      .map((file) => [normalizePath(file.path || file.name), file.content || ""]),
-  );
-
-  const jsMap = new Map(
-    Array.from(fileMap.values())
-      .filter((file) => file.language === "javascript")
-      .map((file) => [normalizePath(file.path || file.name), file.content || ""]),
-  );
-
-  html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi, (match, href) => {
-    const resolved = resolvePreviewPath(htmlFile.path || htmlFile.name, href);
-    const css = cssMap.get(resolved);
-    if (css !== undefined) {
-      return `<style>${css}</style>`;
-    }
-    return match;
-  });
-
-  html = html.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (match, src) => {
-    const resolved = resolvePreviewPath(htmlFile.path || htmlFile.name, src);
-    const js = jsMap.get(resolved);
-    if (js !== undefined) {
-      return `<script>${js}</script>`;
-    }
-    return match;
-  });
-
-  if (!/<meta[^>]*charset/i.test(html)) {
-    if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/<head([^>]*)>/i, `<head$1>\n<meta charset=\"utf-8\">`);
-    } else {
-      html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body>${html}</body></html>`;
-    }
-  }
-
-  return html;
-}
-
-function escapePreviewHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function getLangFromPath(path: string) {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const map: Record<string, string> = {
@@ -287,8 +127,22 @@ async function readProjectDirectory(rootHandle: FileSystemDirectoryHandleLike) {
         await walk(handle, path);
       } else if (handle.kind === "file") {
         const file = await handle.getFile();
-        if (file.size > 512 * 1024) continue;
-        const content = await file.text();
+        if (file.size > 8 * 1024 * 1024) continue;
+        const isBin = /\.(png|jpe?g|gif|webp|ico|bmp|svg|pdf|mp3|wav|mp4|webm|wasm|woff2?|ttf|otf)$/i.test(path) ||
+          file.type.startsWith("image/") || file.type.startsWith("audio/") || file.type.startsWith("video/");
+
+        let content = "";
+        if (isBin) {
+          content = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve((e.target?.result as string) || "");
+            reader.onerror = () => resolve("");
+            reader.readAsDataURL(file);
+          });
+        } else {
+          content = await file.text();
+        }
+
         files.push({ name: path, path, content, language: getLangFromPath(path) });
         handles.set(path, handle);
       }
@@ -337,16 +191,18 @@ export default function RoomPage() {
 
   const [activePanel, setActivePanel] = useState<string>("files");
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewFullscreen, setPreviewFullscreen] = useState(false);
-  const [projectPreviewUrl, setProjectPreviewUrl] = useState<string | null>(null);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-  const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "saved">("synced");
+  const [syncStatus, setSyncStatus] = useState<"synced" | "syncing" | "saved" | "failed">("synced");
+  const [fileConflict, setFileConflict] = useState<{
+    path: string;
+    diskContent: string;
+    diskMtime: number;
+    message: string;
+  } | null>(null);
+  const fileMtimesRef = useRef<Map<string, number>>(new Map());
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
   const [wordWrap, setWordWrap] = useState(false);
-  const [previewMode, setPreviewMode] = useState<"file" | "folder" | "project">("file");
-  const [previewTarget, setPreviewTarget] = useState<string>("");
 
   // Media
   const [micOn, setMicOn] = useState(false);
@@ -364,6 +220,14 @@ export default function RoomPage() {
   const [pubVisibility, setPubVisibility] = useState<"public" | "private">("public");
   const [pubAccessCode, setPubAccessCode] = useState("");
   const [publishing, setPublishing] = useState(false);
+
+  // Open Project & Save Confirmation Modal states
+  const [showOpenConfirmModal, setShowOpenConfirmModal] = useState(false);
+  const [downloadProjectName, setDownloadProjectName] = useState("my-workspace");
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+
+  // Live Server state
+  const [isLiveServerOn, setIsLiveServerOn] = useState(false);
 
   useEffect(() => {
     if (publishOpen) {
@@ -588,12 +452,52 @@ export default function RoomPage() {
   }, [roomId, router]);
 
   // ── Save files to Supabase (debounced) ──
-  const saveFilesToDb = useCallback((filesToSave: FileItem[]) => {
-    if (filesSaveTimer.current) clearTimeout(filesSaveTimer.current);
-    filesSaveTimer.current = setTimeout(async () => {
-      await supabase.from("rooms").update({ files_json: filesToSave }).eq("id", roomId);
-    }, 500);
+  const pendingSaveRef = useRef<FileItem[] | null>(null);
+  const saveInFlightRef = useRef(false);
+
+  // Never silently drop edits: latest payload is buffered client-side and
+  // retried with exponential backoff until it lands or user retries manually.
+  const flushFilesSave = useCallback(async (): Promise<boolean> => {
+    const payload = pendingSaveRef.current;
+    if (!payload || saveInFlightRef.current) return false;
+    saveInFlightRef.current = true;
+    let ok = false;
+    for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+      try {
+        const { error } = await supabase.from("rooms").update({ files_json: payload }).eq("id", roomId);
+        if (!error) { ok = true; break; }
+        throw new Error(error.message);
+      } catch {
+        if (attempt < 3) {
+          fetch("/api/reliability", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "save_retry" }), keepalive: true }).catch(() => {});
+          await new Promise((r) => setTimeout(r, 600 * Math.pow(2, attempt) + Math.random() * 250));
+        }
+      }
+    }
+    saveInFlightRef.current = false;
+    if (ok) {
+      if (pendingSaveRef.current === payload) pendingSaveRef.current = null;
+      setSyncStatus("saved");
+    } else {
+      fetch("/api/reliability", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "save_failed" }), keepalive: true }).catch(() => {});
+      setSyncStatus("failed");
+    }
+    return ok;
   }, [roomId]);
+
+  const saveFilesToDb = useCallback((filesToSave: FileItem[]) => {
+    pendingSaveRef.current = filesToSave;
+    if (filesSaveTimer.current) clearTimeout(filesSaveTimer.current);
+    filesSaveTimer.current = setTimeout(() => { void flushFilesSave(); }, 500);
+  }, [flushFilesSave]);
+
+  // Best-effort immediate flush when the tab is hidden/closed (Monaco keeps
+  // in-memory edits alive meanwhile, so worst case is a late save, not a loss).
+  useEffect(() => {
+    const onHide = () => { void flushFilesSave(); };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [flushFilesSave]);
 
   // ── Presence channel ──
   useEffect(() => {
@@ -758,29 +662,56 @@ export default function RoomPage() {
   }, []);
 
   const handleSaveProject = useCallback(async () => {
-    if (!directoryHandleRef.current) {
-      addToast("Open a local folder first to save files back to your PC.", "info");
-      saveFilesToDb(files);
-      return;
-    }
-
+    setSyncStatus("syncing");
     try {
-      for (const file of files) {
-        if (!file.isFolder) await writeFileToLocalProject(file.path || file.name, file.content || "");
+      const activeContent = codeRef.current;
+      const cleanActivePath = normalizePath(activeFile);
+      const updatedFiles = files.map((f) => {
+        if (!f.isFolder && normalizePath(f.path || f.name) === cleanActivePath) {
+          return { ...f, content: activeContent };
+        }
+        return f;
+      });
+
+      // 1. Sync to server workspace
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        await fetch("/api/terminal", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ action: "sync-files", roomId, files: updatedFiles }),
+        });
+      } catch {}
+
+      // 2. If browser directory handle is open, save to local folder
+      if (directoryHandleRef.current) {
+        for (const file of updatedFiles) {
+          if (!file.isFolder) {
+            await writeFileToLocalProject(file.path || file.name, file.content || "");
+          }
+        }
       }
+
+      // 3. Save to Supabase DB
+      await saveFilesToDb(updatedFiles);
+
       setModifiedFiles(new Set());
       setSyncStatus("saved");
-      addToast("Project saved to your PC", "success");
-    } catch {
-      addToast("Could not save to local folder. Re-open it and allow write access.", "error");
+      addToast("Saved ✓", "success");
+    } catch (err: any) {
+      setSyncStatus("failed");
+      addToast(`Save failed: ${err?.message || "Unknown error"}`, "error");
     }
-  }, [addToast, files, saveFilesToDb, writeFileToLocalProject]);
+  }, [activeFile, addToast, files, roomId, saveFilesToDb, writeFileToLocalProject]);
 
   useEffect(() => {
     saveRef.current = handleSaveProject;
   }, [handleSaveProject]);
 
-  const handleOpenProject = useCallback(async () => {
+  const executeOpenProject = useCallback(async () => {
     const picker = (window as any).showDirectoryPicker;
     if (!picker) {
       addToast("Your browser does not support opening folders. Drag files into Explorer instead.", "error");
@@ -798,30 +729,82 @@ export default function RoomPage() {
       directoryHandleRef.current = rootHandle;
       fileHandlesRef.current = handles;
       const firstFile = projectFiles.find((file) => !file.isFolder);
-      setProjectName(rootHandle.name || "Local project");
+      const projName = rootHandle.name || "Local project";
+      setProjectName(projName);
+
+      // 1. Completely replace workspace files with the newly opened project
       setFiles(projectFiles);
       setOpenTabs(firstFile ? [firstFile.name] : []);
       setActiveFile(firstFile?.name || "");
       setModifiedFiles(new Set());
+
+      // 2. Wipe server workspace & sync fresh project files
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        await fetch("/api/terminal", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ action: "sync-files", roomId, files: projectFiles, reset: true }),
+        });
+      } catch {}
+
+      // 3. Update Supabase room files
       await supabase.from("rooms").update({ files_json: projectFiles }).eq("id", roomId);
+
+      // 4. Broadcast to all users in the room so all collaborators immediately load the new project
       await roomChannelRef.current?.send({
         type: "broadcast",
         event: "project-opened",
         payload: {
           files: projectFiles,
           activeFile: firstFile?.name || "",
-          projectName: rootHandle.name || "Local project",
+          projectName: projName,
           expandedFolders: getFolderPaths(projectFiles),
           openTabs: firstFile ? [firstFile.name] : [],
           userId: currentUserId,
           userName: currentUserName,
         },
       });
-      addToast(`${rootHandle.name || "Project"} opened and shared with the room`, "success");
+      addToast(`${projName} opened and synchronized with all collaborators!`, "success");
     } catch (err: any) {
       if (err?.name !== "AbortError") addToast("Could not open that project folder.", "error");
     }
-  }, [addToast, currentUserId, currentUserName, saveFilesToDb]);
+  }, [addToast, currentUserId, currentUserName, roomId]);
+
+  const handleOpenProject = useCallback(() => {
+    if (files.length > 0) {
+      const defaultName = projectName && projectName !== "Untitled Room" && !projectName.startsWith("{")
+        ? projectName
+        : "my-workspace";
+      setDownloadProjectName(defaultName);
+      setShowOpenConfirmModal(true);
+    } else {
+      void executeOpenProject();
+    }
+  }, [executeOpenProject, files.length, projectName]);
+
+  const handleToggleLiveServer = useCallback(async () => {
+    // 1. Flush any pending edits to the workspace
+    saveRef.current?.();
+
+    // 2. Determine target HTML file (active file if html/htm, or find an index.html / first html in files)
+    const cleanActive = normalizePath(activeFile);
+    let targetHtml = "";
+    if (cleanActive.endsWith(".html") || cleanActive.endsWith(".htm")) {
+      targetHtml = cleanActive;
+    } else {
+      const foundHtml = files.find(f => !f.isFolder && (f.name.endsWith(".html") || f.name.endsWith(".htm")));
+      targetHtml = foundHtml ? normalizePath(foundHtml.path || foundHtml.name) : "index.html";
+    }
+
+    const previewUrl = `${window.location.origin}/api/workspace/${roomId}/${targetHtml}`;
+    window.open(previewUrl, "_blank");
+    setIsLiveServerOn(true);
+    addToast(`Live Server started on Port 5500 (${targetHtml}) — Live Reload active! ⚡`, "success");
+  }, [activeFile, addToast, files, roomId]);
 
   const handleFileCreate = useCallback((file: FileItem) => {
     const nextFile = normalizeFileItem(file);
@@ -987,6 +970,7 @@ export default function RoomPage() {
 
   // ── Run code ──
   const [triggerRun, setTriggerRun] = useState(0);
+  const [terminalAction, setTerminalAction] = useState<{ type: "new" | "split" | "kill" | "clear"; timestamp: number } | null>(null);
   function handleRunCode() {
     setTerminalOpen(true);
     setTriggerRun((p) => p + 1);
@@ -1009,8 +993,6 @@ export default function RoomPage() {
       if (mod && e.key === "s") { 
         e.preventDefault(); 
         saveRef.current?.(); 
-        addToast(directoryHandleRef.current ? "Project saved to your PC" : "Workspace saved to cloud", "success");
-        setModifiedFiles(prev => { const n = new Set(prev); n.delete(activeFile); return n; }); 
       }
       
       // Ctrl + N (New File)
@@ -1072,28 +1054,6 @@ export default function RoomPage() {
   }, [activeFile, currentUserId, currentUserName]);
   const handleSyncStatus = useCallback((status: "synced" | "syncing" | "saved") => { setSyncStatus(status); }, []);
 
-  const selectedPreviewFile = previewTarget || activeFile;
-  const previewSrcDoc = useMemo(() => buildPreviewSrcDoc(files, selectedPreviewFile), [files, selectedPreviewFile]);
-  const previewPath = useMemo(() => {
-    const htmlFile = getPreviewHtmlFile(files, selectedPreviewFile);
-    return htmlFile?.path || htmlFile?.name || "";
-  }, [files, selectedPreviewFile]);
-  const activeFileItem = useMemo(() => files.find((f) => normalizePath(f.path || f.name) === selectedPreviewFile), [files, selectedPreviewFile]);
-
-  const handlePreviewOpen = useCallback(() => {
-    setPreviewFullscreen(false);
-    setPreviewOpen(true);
-  }, []);
-
-  const handlePreviewClose = useCallback(() => {
-    setPreviewOpen(false);
-    setPreviewFullscreen(false);
-  }, []);
-
-  const togglePreviewFullscreen = useCallback(() => {
-    setPreviewFullscreen((prev) => !prev);
-  }, []);
-
   useEffect(() => {
     const timer = setInterval(() => {
       const cutoff = Date.now() - 15000;
@@ -1139,8 +1099,15 @@ export default function RoomPage() {
         micOn={micOn} cameraOn={cameraOn} screenOn={screenOn}
         onMicToggle={handleMicToggle} onCameraToggle={handleCameraToggle} 
         onScreenToggle={handleScreenToggle}
-        onRunCode={handleRunCode} onPreview={handlePreviewOpen} onAddToast={addToast}
+        onRunCode={handleRunCode} onAddToast={addToast}
         onPublishClick={() => setPublishOpen(true)}
+        onSaveWork={() => saveRef.current?.()}
+        onOpenProject={handleOpenProject}
+        onOpenLiveServer={handleToggleLiveServer}
+        onTerminalNew={() => { setTerminalOpen(true); setTerminalAction({ type: "new", timestamp: Date.now() }); }}
+        onTerminalSplit={() => { setTerminalOpen(true); setTerminalAction({ type: "split", timestamp: Date.now() }); }}
+        onTerminalKill={() => setTerminalAction({ type: "kill", timestamp: Date.now() })}
+        onTerminalToggle={() => setTerminalOpen((p) => !p)}
       />
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0, position: "relative" }}>
@@ -1227,6 +1194,7 @@ export default function RoomPage() {
             activeTab={activeFile}
             onTabSelect={handleFileSelect}
             onTabClose={handleTabClose}
+            onOpenLiveServer={handleToggleLiveServer}
           />
 
           {/* Breadcrumb */}
@@ -1252,185 +1220,11 @@ export default function RoomPage() {
                 roomId={room.id} codeRef={codeRef}
                 language={currentLang} activeFileName={activeFile}
                 triggerRun={triggerRun}
+                terminalAction={terminalAction}
                 files={files}
                 onFilesSync={handleTerminalFilesSync}
-                onPreviewUrlChange={setProjectPreviewUrl}
                 onOutputLog={(chunk) => setTerminalLogs((prev) => [...prev.slice(-120), chunk])}
               />
-            </div>
-          )}
-
-          {previewOpen && (
-            <div style={{
-              position: previewFullscreen ? "fixed" : "absolute",
-              inset: previewFullscreen ? 0 : "24px",
-              zIndex: 9999,
-              background: "#ffffff",
-              display: "flex",
-              flexDirection: "column",
-              borderRadius: previewFullscreen ? 0 : 16,
-              boxShadow: previewFullscreen ? "none" : "0 32px 80px rgba(0,0,0,0.55)",
-              overflow: "hidden",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#1a1a2e", borderBottom: "1px solid #2a2a38" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Eye size={14} color="#ffffff" />
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>
-                      {projectPreviewUrl ? "Live Project Web Server" : previewMode === "project" ? "Full Project Preview" : previewMode === "folder" ? "Folder Preview" : "File Preview"}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                      {projectPreviewUrl || previewTarget || previewPath || activeFile || "No file selected"}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {/* Preview Mode Selector */}
-                  <select
-                    value={previewMode}
-                    onChange={(e) => {
-                      setPreviewMode(e.target.value as "file" | "folder" | "project");
-                      setPreviewTarget("");
-                    }}
-                    style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer" }}
-                  >
-                    <option value="file">📄 Current File</option>
-                    <option value="folder">📁 Select Folder</option>
-                    <option value="project">🌐 Full Project</option>
-                  </select>
-                  
-                  {/* File/Folder Selector */}
-                  {previewMode === "file" && (
-                    <select
-                      value={previewTarget || activeFile || ""}
-                      onChange={(e) => setPreviewTarget(e.target.value)}
-                      style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer", maxWidth: 150 }}
-                    >
-                      {files.filter(f => !f.isFolder).map(f => (
-                        <option key={f.path || f.name} value={f.path || f.name}>{f.path || f.name}</option>
-                      ))}
-                    </select>
-                  )}
-                  {previewMode === "folder" && (
-                    <select
-                      value={previewTarget}
-                      onChange={(e) => setPreviewTarget(e.target.value)}
-                      style={{ padding: "4px 8px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", fontSize: 11, cursor: "pointer", maxWidth: 150 }}
-                    >
-                      <option value="">Select a folder...</option>
-                      {files.filter(f => f.isFolder).map(f => (
-                        <option key={f.name} value={f.name}>{f.name}</option>
-                      ))}
-                    </select>
-                  )}
-                  
-                  <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ffffff22", border: "1px solid #ffffff55", borderRadius: 6, color: "#ffffff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                    <Play size={11} /> Run Code
-                  </button>
-                  <button onClick={togglePreviewFullscreen} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#252b38", border: "1px solid #383f4d", borderRadius: 6, color: "#e2e8f0", cursor: "pointer", fontSize: 11 }}>
-                    {previewFullscreen ? "Exit Full Screen" : "Full Screen"}
-                  </button>
-                  <button onClick={handlePreviewClose} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ flex: 1, position: "relative", background: "#ffffff", display: "flex", flexDirection: "column" }}>
-                {projectPreviewUrl ? (
-                  <iframe
-                    src={projectPreviewUrl}
-                    title="Project Preview"
-                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
-                  />
-                ) : previewMode === "project" ? (
-                  <iframe
-                    sandbox="allow-scripts allow-same-origin"
-                    srcDoc={buildProjectPreview(files)}
-                    title="Full Project Preview"
-                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
-                  />
-                ) : previewMode === "folder" && previewTarget ? (
-                  <iframe
-                    sandbox="allow-scripts allow-same-origin"
-                    srcDoc={buildFolderPreview(files, previewTarget)}
-                    title="Folder Preview"
-                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
-                  />
-                ) : previewSrcDoc ? (
-                  <iframe
-                    sandbox="allow-scripts allow-same-origin"
-                    srcDoc={previewSrcDoc}
-                    title="CodeTogether Website Preview"
-                    style={{ width: "100%", height: "100%", border: "none", background: "#ffffff" }}
-                  />
-                ) : (
-                  <div style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", gap: 16, overflowY: "auto" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#13131c", border: "1px solid #222234", borderRadius: 12, padding: "12px 16px" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>
-                          📄 {activeFile || "Workspace File"} Output Preview
-                        </div>
-                        <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-                          Project Language: <strong style={{ color: "#ffffff" }}>{currentLang}</strong> · Interactive Console & Terminal Output
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => setTerminalLogs([])} style={{ padding: "4px 10px", background: "#1e1e2d", border: "1px solid #33334d", borderRadius: 6, color: "#aaa", fontSize: 11, cursor: "pointer" }}>
-                          Clear Output
-                        </button>
-                        <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "4px 12px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 6, color: "#000", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
-                          ▶ Execute Project
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Output Content */}
-                    {activeFile?.endsWith(".md") ? (
-                      <div style={{ background: "#0d0d14", border: "1px solid #1a1a2e", borderRadius: 12, padding: 20, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7, fontFamily: "Inter, sans-serif" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#ffffff", textTransform: "uppercase", marginBottom: 12, letterSpacing: "0.08em" }}>
-                          Markdown Document Preview
-                        </div>
-                        <div dangerouslySetInnerHTML={{
-                          __html: escapePreviewHtml(activeFileItem?.content || "")
-                            .replace(/^# (.*$)/gim, '<h1 style="font-size:22px;color:#fff;margin:12px 0 6px">$1</h1>')
-                            .replace(/^## (.*$)/gim, '<h2 style="font-size:18px;color:#ffffff;margin:10px 0 4px">$1</h2>')
-                            .replace(/^### (.*$)/gim, '<h3 style="font-size:15px;color:#e2e8f0;margin:8px 0 4px">$1</h3>')
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/`([^`]+)`/g, '<code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;color:#ffffff">$1</code>')
-                            .replace(/\n/g, '<br/>')
-                        }} />
-                      </div>
-                    ) : terminalLogs.length > 0 ? (
-                      <div style={{ flex: 1, background: "#06060c", border: "1px solid #1e1e2e", borderRadius: 12, padding: 16, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, lineHeight: 1.6, color: "#e2e8f0", overflowY: "auto", maxHeight: "60vh" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#34d399" }} /> Live Console & Terminal Output Log
-                        </div>
-                        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                          {terminalLogs.join("")}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div style={{ background: "#0d0d14", border: "1px dashed #2a2a3c", borderRadius: 12, padding: 32, textAlign: "center", color: "#94a3b8" }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 8 }}>
-                          ⚡ Ready to Run Output Preview
-                        </div>
-                        <p style={{ fontSize: 13, color: "#888", maxWidth: 500, margin: "0 auto 16px" }}>
-                          This project will display its live execution output here. Run your script or project from the terminal, or click the button below to start.
-                        </p>
-                        <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-                          <button onClick={() => { setTerminalOpen(true); setTriggerRun(Date.now()); }} style={{ padding: "8px 18px", background: "linear-gradient(135deg,#ffffff,#cccccc)", border: "none", borderRadius: 8, color: "#000", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
-                            ▶ Execute {activeFile || "Project"} Now
-                          </button>
-                          <button onClick={() => setTerminalOpen(true)} style={{ padding: "8px 16px", background: "#1a1a28", border: "1px solid #33334d", borderRadius: 8, color: "#ccc", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                            💻 Open Interactive Terminal
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -1440,6 +1234,10 @@ export default function RoomPage() {
         language={currentLang} cursorLine={cursorLine} cursorColumn={cursorCol}
         syncStatus={syncStatus} participantCount={members.length}
         wordWrap={wordWrap} onWordWrapToggle={() => setWordWrap((p) => !p)} tabSize={2}
+        onSaveRetry={() => { setSyncStatus("syncing"); void flushFilesSave(); }}
+        isLiveServerOn={isLiveServerOn}
+        onToggleLiveServer={handleToggleLiveServer}
+        liveServerPort={5500}
       />
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
@@ -1603,6 +1401,147 @@ export default function RoomPage() {
                 Join Room as &ldquo;{tempNickname.trim() || "Guest"}&rdquo;
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── File Conflict Dialog (Local Agent) ── */}
+      {fileConflict && (
+        <div className="fixed inset-0 z-[999999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#18181b] border border-amber-500/50 rounded-xl shadow-2xl max-w-md w-full p-5 text-gray-200">
+            <div className="flex items-center gap-2.5 text-amber-400 mb-2 font-bold text-sm">
+              <ShieldAlert size={20} />
+              <span>File Modified on Local Disk</span>
+            </div>
+            <p className="text-xs text-gray-300 mb-2 leading-relaxed">
+              <span className="font-mono text-amber-300 font-semibold">{fileConflict.path}</span> was changed on your computer outside of CodeTogether.
+            </p>
+            <p className="text-[11px] text-gray-400 mb-4 leading-relaxed">
+              To avoid overwriting unsaved work, choose whether to overwrite the file on disk with your CodeTogether editor content or reload the latest version from your disk.
+            </p>
+            <div className="flex justify-end gap-2 text-xs">
+              <button
+                onClick={() => {
+                  const newContent = fileConflict.diskContent;
+                  setFiles((prev) =>
+                    prev.map((f) =>
+                      normalizePath(f.path || f.name) === normalizePath(fileConflict.path)
+                        ? { ...f, content: newContent }
+                        : f
+                    )
+                  );
+                  if (normalizePath(activeFile) === normalizePath(fileConflict.path)) {
+                    codeRef.current = newContent;
+                  }
+                  fileMtimesRef.current.set(fileConflict.path, fileConflict.diskMtime);
+                  setFileConflict(null);
+                  addToast(`Reloaded ${fileConflict.path} from local disk`, "info");
+                }}
+                className="px-3 py-1.5 rounded-lg border border-[#3f3f46] text-gray-300 hover:text-white hover:bg-[#27272a] font-medium transition-colors"
+              >
+                Reload from Disk
+              </button>
+              <button
+                onClick={async () => {
+                  const filePath = fileConflict.path;
+                  const contentToSave = normalizePath(activeFile) === normalizePath(filePath)
+                    ? codeRef.current
+                    : (files.find(f => normalizePath(f.path || f.name) === normalizePath(filePath))?.content || "");
+                  const res = await localAgentClient.saveFile(filePath, contentToSave, 0);
+                  if (res.ok && res.mtimeMs) {
+                    fileMtimesRef.current.set(filePath, res.mtimeMs);
+                    setSyncStatus("saved");
+                    addToast("Saved ✓ (Overwrote local disk version)", "success");
+                  }
+                  setFileConflict(null);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold shadow-md transition-colors"
+              >
+                Overwrite Local File
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Open New Project Confirmation / Save Modal ── */}
+      {showOpenConfirmModal && (
+        <div className="fixed inset-0 z-[999999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#18181b] border border-[#3f3f46] rounded-xl shadow-2xl max-w-lg w-full overflow-hidden text-gray-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#27272a] bg-[#121214]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Open New Project</h3>
+                  <p className="text-[11px] text-gray-400">Workspace Replacement Warning</p>
+                </div>
+              </div>
+              <button onClick={() => setShowOpenConfirmModal(false)} className="text-gray-400 hover:text-white p-1 rounded transition-colors cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-gray-300 leading-relaxed">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-200 text-xs">
+                ⚠️ <strong>Warning:</strong> Opening a new project will clear all previous work and replace the workspace for <strong>all users</strong> in this room.
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-300 uppercase tracking-wider mb-1.5">
+                  Save / Download Current Workspace to PC:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={downloadProjectName}
+                    onChange={(e) => setDownloadProjectName(e.target.value)}
+                    placeholder="Workspace folder name (e.g. my-project)"
+                    className="flex-1 bg-[#101014] border border-[#3f3f46] rounded-lg px-3 py-2 text-white font-mono text-xs focus:border-sky-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={async () => {
+                      setIsDownloadingZip(true);
+                      try {
+                        await downloadProjectZip(downloadProjectName || projectName || "my-workspace", files);
+                        addToast("Project downloaded successfully!", "success");
+                      } catch (err: any) {
+                        addToast(`Download failed: ${err.message}`, "error");
+                      } finally {
+                        setIsDownloadingZip(false);
+                      }
+                    }}
+                    disabled={isDownloadingZip}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition-colors shrink-0 cursor-pointer disabled:opacity-50"
+                  >
+                    <Download size={13} />
+                    {isDownloadingZip ? "Saving..." : "Save to PC (.zip)"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  Click <strong>Save to PC</strong> to save your current files as a folder ZIP on your computer before continuing.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-5 py-3.5 border-t border-[#27272a] bg-[#121214]">
+              <button
+                onClick={() => setShowOpenConfirmModal(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-[#3f3f46] text-gray-300 hover:text-white hover:bg-[#27272a] text-xs font-medium transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowOpenConfirmModal(false);
+                  void executeOpenProject();
+                }}
+                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors cursor-pointer shadow-md"
+              >
+                Proceed & Open New Project
+              </button>
+            </div>
           </div>
         </div>
       )}

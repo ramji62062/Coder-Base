@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import MonacoEditor, { type OnMount } from "@monaco-editor/react";
 import { X, Search, Replace, ChevronDown, ChevronUp } from "lucide-react";
+import { LspClient } from "@/lib/lsp-client";
+import { supabase } from "@/lib/supabase";
 
 type EditorProps = {
   roomId: string;
@@ -38,6 +40,7 @@ export default function Editor(props: EditorProps) {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const remoteDecorationsRef = useRef<any>(null);
+  const lspRef = useRef<LspClient | null>(null);
 
   // The last value that the LOCAL user typed into Monaco.
   // When props.code changes and equals this ref, it's just React reflecting
@@ -121,6 +124,15 @@ export default function Editor(props: EditorProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.code, props.activeFileName]);
 
+  // ── Real LSP client (dedicated /ws/lsp channel) ──
+  const connectLsp = useCallback(async () => {
+    if (!props.roomId || !lspRef.current) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) return;
+    lspRef.current.connect(props.roomId, token, props.currentUserId, props.language);
+  }, [props.roomId, props.currentUserId, props.language]);
+
   // ── Editor mount ──
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -130,6 +142,17 @@ export default function Editor(props: EditorProps) {
     const mountedValue = editor.getModel()?.getValue() ?? props.code;
     localValueRef.current = mountedValue;
     props.codeRef.current = mountedValue;
+
+    // Wire the real language server for this (room, file, language).
+    if (!lspRef.current) {
+      lspRef.current = new LspClient({
+        monaco,
+        getEditor: () => editorRef.current,
+        getActiveFile: () => props.activeFileName,
+        getLanguage: () => props.language,
+      });
+    }
+    void connectLsp();
 
     // If props.code changed between first render and mount, apply it now.
     if (mountedValue !== props.code) {
@@ -160,10 +183,34 @@ export default function Editor(props: EditorProps) {
       props.onCursorChange(e.position.lineNumber, e.position.column);
     });
 
+    // Ctrl+S / Cmd+S → Save project / file
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      props.saveRef.current?.();
+    });
+
     // Ctrl+H / Ctrl+F → custom find-replace panel
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH, () => setIsFindOpen(true));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => setIsFindOpen(true));
   };
+
+  // ── LSP: keep the open document in sync with the active file ──
+  useEffect(() => {
+    lspRef.current?.setActiveFile(props.activeFileName);
+  }, [props.activeFileName]);
+
+  // ── LSP: re-bind to the correct language server when language changes ──
+  useEffect(() => {
+    lspRef.current?.setLanguage(props.language);
+    if (lspRef.current) {
+      lspRef.current.disconnect();
+      void connectLsp();
+    }
+  }, [props.language, connectLsp]);
+
+  // ── LSP: cleanup on unmount ──
+  useEffect(() => {
+    return () => { lspRef.current?.dispose(); lspRef.current = null; };
+  }, []);
 
   // ── Remote cursors ──
   useEffect(() => {
@@ -249,7 +296,21 @@ export default function Editor(props: EditorProps) {
               </div>
             </div>
             <div className="flex flex-1 items-center justify-center overflow-auto bg-[radial-gradient(#222_1px,transparent_0)] bg-[length:16px_16px] p-5">
-              <img src={codeContent} alt={props.activeFileName} className="max-h-[90%] max-w-[90%] rounded-md shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-transform duration-150 ease-out" style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center" }} />
+              {(() => {
+                const imageSrc = codeContent.startsWith("data:")
+                  ? codeContent
+                  : codeContent.trim().startsWith("<svg")
+                  ? `data:image/svg+xml;utf8,${encodeURIComponent(codeContent)}`
+                  : `/api/workspace/${props.roomId}/${props.activeFileName}`;
+                return (
+                  <img
+                    src={imageSrc}
+                    alt={props.activeFileName}
+                    className="max-h-[90%] max-w-[90%] rounded-md shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-transform duration-150 ease-out"
+                    style={{ transform: `scale(${imageZoom})`, transformOrigin: "center center" }}
+                  />
+                );
+              })()}
             </div>
           </div>
         ) : isPdf ? (

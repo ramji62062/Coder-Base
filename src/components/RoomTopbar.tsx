@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Play, Share2, LogOut, Mic, MicOff, Video, VideoOff, Monitor, Copy,
   ChevronRight, Code, Search, X, Settings, RotateCcw, Terminal, FileText,
-  FolderOpen, Save, FilePlus, Eye
+  FolderOpen, Save, FilePlus
 } from "lucide-react";
 
 type Participant = { userId: string; name: string; avatar?: string | null };
@@ -26,9 +26,15 @@ type RoomTopbarProps = {
   onCameraToggle: () => void;
   onScreenToggle: () => void;
   onRunCode: () => void;
-  onPreview?: () => void;
   onAddToast?: (msg: string, type: "info" | "error" | "success") => void;
   onPublishClick?: () => void;
+  onSaveWork?: () => void;
+  onOpenProject?: () => void;
+  onOpenLiveServer?: () => void;
+  onTerminalNew?: () => void;
+  onTerminalSplit?: () => void;
+  onTerminalKill?: () => void;
+  onTerminalToggle?: () => void;
 };
 
 function getRoomDisplayName(roomName: string | null): string {
@@ -52,7 +58,8 @@ export default function RoomTopbar({
   language, onLanguageChange, participants,
   micOn, cameraOn, screenOn,
   onMicToggle, onCameraToggle, onScreenToggle,
-  onRunCode, onPreview, onAddToast, onPublishClick,
+  onRunCode, onAddToast, onPublishClick, onSaveWork, onOpenProject, onOpenLiveServer,
+  onTerminalNew, onTerminalSplit, onTerminalKill, onTerminalToggle,
 }: RoomTopbarProps) {
   const router = useRouter();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -73,9 +80,9 @@ export default function RoomTopbar({
       label: "File",
       items: [
         { label: "New File", shortcut: "⌘N" },
-        { label: "Open File...", shortcut: "⌘O" },
-        { label: "Save", shortcut: "⌘S" },
-        { label: "Save All", shortcut: "⌘⇧S" },
+        { label: "Open Folder / Project...", shortcut: "⌘O", action: onOpenProject },
+        { label: "Save", shortcut: "⌘S", action: onSaveWork },
+        { label: "Save All", shortcut: "⌘⇧S", action: onSaveWork },
         { label: "Publish to Library", action: onPublishClick, divider: true },
         { label: "Share Room Link", action: copyLink },
         { label: "Copy Room Code", action: copyCode, divider: true },
@@ -96,7 +103,8 @@ export default function RoomTopbar({
       items: [
         { label: "Explorer", shortcut: "⌘⇧E" },
         { label: "Search", shortcut: "⌘⇧F" },
-        { label: "Terminal", shortcut: "⌘`", divider: true },
+        { label: "Live Server Preview", action: onOpenLiveServer },
+        { label: "Terminal", shortcut: "⌘`", action: onTerminalToggle, divider: true },
         { label: "Toggle Word Wrap", shortcut: "⌥Z" },
       ],
     },
@@ -104,7 +112,17 @@ export default function RoomTopbar({
       label: "Run",
       items: [
         { label: "Run Code", shortcut: "⌃↵", action: onRunCode },
+        { label: "Open with Live Server", shortcut: "⌥L", action: onOpenLiveServer },
         { label: "Stop", shortcut: "⌘." },
+      ],
+    },
+    {
+      label: "Terminal",
+      items: [
+        { label: "New Terminal", shortcut: "⌃⇧`", action: onTerminalNew },
+        { label: "Split Terminal", action: onTerminalSplit },
+        { label: "Kill Terminal", action: onTerminalKill, divider: true },
+        { label: "Toggle Terminal", shortcut: "⌘`", action: onTerminalToggle },
       ],
     },
     {
@@ -235,17 +253,6 @@ export default function RoomTopbar({
             className="flex items-center gap-[4px] px-[10px] py-[3px] bg-[#2ea043] border-none rounded-[3px] text-white text-[11px] font-semibold cursor-pointer hover:bg-[#2c973e] transition-colors"
           >
             <Play size={11} fill="white" /> Run
-          </button>
-
-          {/* Preview */}
-          <button
-            onClick={onPreview}
-            disabled={!onPreview}
-            className={`flex items-center gap-[4px] px-[10px] py-[3px] bg-white border-none rounded-[3px] text-black text-[11px] font-semibold transition-opacity ${
-              onPreview ? "cursor-pointer hover:bg-gray-200 opacity-100" : "cursor-not-allowed opacity-50"
-            }`}
-          >
-            <Eye size={11} fill="black" /> Preview
           </button>
 
           {/* Share */}
