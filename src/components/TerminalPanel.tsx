@@ -483,64 +483,79 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
   return `node "${target}"`;
 }
 
-  // ── Execute run command through PTY ──
+  // ── Execute run command through PTY or /api/run-code ──
   const executeRunCommand = useCallback(async () => {
     const rt = runtimesRef.current.get(activeTabId);
     const tab = getActiveTab();
-    if (!rt || !tab || !rt.attached) return;
+    if (!rt || !tab) return;
 
     const currentFiles = filesRef.current || [];
     const activeContent = (codeRef && codeRef.current) !== undefined ? codeRef.current : "";
-    const updatedFiles = currentFiles.map((f) => {
-      if (!f.isFolder && normalizePath(f.path || f.name) === normalizePath(activeFileName)) {
-        return { ...f, content: activeContent };
+    const currentCode = activeContent || currentFiles.find((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))?.content || "";
+
+    // If local agent, run through PTY
+    if (rt.attached && rt.transport === "direct-local") {
+      const updatedFiles = currentFiles.map((f) => {
+        if (!f.isFolder && normalizePath(f.path || f.name) === normalizePath(activeFileName)) {
+          return { ...f, content: activeContent };
+        }
+        return f;
+      });
+      if (activeFileName && !updatedFiles.some((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))) {
+        updatedFiles.push({ name: activeFileName, path: activeFileName, content: activeContent, language });
       }
-      return f;
-    });
-    if (activeFileName && !updatedFiles.some((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))) {
-      updatedFiles.push({ name: activeFileName, path: activeFileName, content: activeContent, language });
-    }
-
-    const projectRoot = findProjectRoot(updatedFiles, activeFileName);
-    const currentCode = activeContent || updatedFiles.find((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))?.content || "";
-
-    // Save files first to workspace on disk
-    void saveFilesToWorkspace();
-    if (rt.transport === "direct-local") {
-      // Sync files via local agent
+      const projectRoot = findProjectRoot(updatedFiles, activeFileName);
+      let execCmd = computeRunCommand(language, activeFileName, currentCode);
+      try {
+        const res = await fetch("/api/terminal", {
+          method: "POST",
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({
+            action: "get-run-command",
+            code: currentCode,
+            language,
+            activeFileName,
+            cwd: projectRoot,
+            roomId,
+            files: updatedFiles,
+          }),
+        });
+        const data = await readJson(res);
+        if (data && data.execCmd) execCmd = data.execCmd;
+      } catch {}
+      const prefix = projectRoot && projectRoot !== "." ? `cd ${projectRoot} && ` : "";
+      rt.term.write(`\r\n\x1b[36m# Running ${activeFileName || "script"}\x1b[0m\r\n`);
+      void saveFilesToWorkspace();
       for (const f of updatedFiles) {
         if (!f.isFolder) localAgentClient.saveFile(f.path || f.name, f.content || "");
       }
-    } else {
-      sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
+      sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      return;
     }
 
-    // Determine run command
-    rt.term.write(`\r\n\x1b[36m# Running ${activeFileName || "script"}\x1b[0m\r\n`);
-    
-    let execCmd = computeRunCommand(language, activeFileName, currentCode);
+    // Server transport: use /api/run-code for reliable execution
+    rt.term.write(`\r\n\x1b[1;36m▶ Running ${activeFileName || "code"}...\x1b[0m\r\n`);
     try {
-      const res = await fetch("/api/terminal", {
+      const res = await fetch("/api/run-code", {
         method: "POST",
         headers: await getAuthHeaders(),
         body: JSON.stringify({
-          action: "get-run-command",
           code: currentCode,
           language,
-          activeFileName,
-          cwd: projectRoot,
-          roomId,
-          files: updatedFiles,
+          fileName: activeFileName,
         }),
       });
       const data = await readJson(res);
-      if (data && data.execCmd) {
-        execCmd = data.execCmd;
+      if (data) {
+        if (data.stdout) rt.term.write(data.stdout.replace(/\r?\n/g, "\r\n"));
+        if (data.stderr) rt.term.write(`\x1b[31m${data.stderr.replace(/\r?\n/g, "\r\n")}\x1b[0m`);
+        const exitCode = data.exitCode ?? 0;
+        const statusColor = exitCode === 0 ? "\x1b[32m" : "\x1b[31m";
+        rt.term.write(`\r\n${statusColor}[Process exited with code ${exitCode}]\x1b[0m\r\n`);
       }
-    } catch {}
-
-    const prefix = projectRoot && projectRoot !== "." ? `cd ${projectRoot} && ` : "";
-    sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+    } catch (err: any) {
+      rt.term.write(`\r\n\x1b[31m[Execution Error: ${err.message}]\x1b[0m\r\n`);
+    }
   }, [activeFileName, activeTabId, codeRef, getActiveTab, language, roomId, saveFilesToWorkspace, sendInput, sendWs]);
 
   // ── Main Run handler ──
@@ -562,25 +577,24 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
       updatedFiles.push({ name: activeFileName, path: activeFileName, content: currentCode, language });
     }
 
-    // 1. If a real terminal is attached, run through that PTY.
-    if (rt.attached) {
+    // 1. If running on LOCAL AGENT (direct-local), execute through the real local terminal
+    if (rt.attached && rt.transport === "direct-local") {
       const projectRoot = findProjectRoot(updatedFiles, activeFileName);
       const execCmd = computeRunCommand(language, activeFileName, currentCode);
       const prefix = projectRoot && projectRoot !== "." ? `cd "${projectRoot}" && ` : "";
       rt.term.write(`\r\n\x1b[1;36m▶ Running: ${execCmd}\x1b[0m\r\n`);
       void saveFilesToWorkspace();
-      if (rt.transport === "direct-local") {
-        localAgentClient.saveFile(activeFileName, currentCode);
-        localAgentClient.sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
-      } else {
-        sendWs({ type: "sync-workspace", roomId, files: updatedFiles });
-        sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
+      localAgentClient.saveFile(activeFileName, currentCode);
+      for (const f of updatedFiles) {
+        if (!f.isFolder) localAgentClient.saveFile(f.path || f.name, f.content || "");
       }
+      localAgentClient.sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
       return;
     }
 
-    // 2. Fallback to Piston Execution Engine for 100% reliable execution everywhere!
-    rt.term.write(`\r\n\x1b[1;36m▶ Running ${activeFileName || "code"} via Piston Execution Engine...\x1b[0m\r\n`);
+    // 2. Server PTY or no terminal: use /api/run-code (Piston/Docker) for reliable execution
+    // This writes code to a fresh temp dir and runs it - no CWD issues
+    rt.term.write(`\r\n\x1b[1;36m▶ Running ${activeFileName || "code"}...\x1b[0m\r\n`);
     try {
       const res = await fetch("/api/run-code", {
         method: "POST",

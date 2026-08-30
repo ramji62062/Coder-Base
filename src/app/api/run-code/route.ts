@@ -66,7 +66,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { code, language } = await req.json();
+    const { code, language, fileName: requestedFileName } = await req.json();
     console.log(`[RunCode] Lang: ${language}, Code: ${code?.slice(0, 50)}...`);
 
     if (!code || typeof code !== "string") {
@@ -100,7 +100,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         execFile("docker", dockerArgs, { timeout: 20000, maxBuffer: 1024 * 1024 }, async (err, stdout, stderr) => {
           try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
           if (err) {
-            // Docker failed -> fallback seamlessly to Piston
             console.warn("[RunCode] Shell Docker execution failed, falling back to Piston:", err.message);
             const pistonRes = await executeWithPiston("bash", trimmed);
             if (release) release();
@@ -119,8 +118,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Language specific execution
     const runnable = getRunnableFile(language || "javascript", code);
-    const fileName = runnable.fileName;
-    const execCmd = runnable.execCmd;
+    // Strip directory paths from requested filename (e.g. "src/main.js" -> "main.js")
+    const cleanRequestedName = requestedFileName ? String(requestedFileName).replace(/\\/g, "/").split("/").pop() || requestedFileName : undefined;
+    const fileName = cleanRequestedName || runnable.fileName;
+    const execCmd = cleanRequestedName ? (runnable.execCmd.replace(runnable.fileName, quoteShell(fileName)) || `node ${quoteShell(fileName)}`) : runnable.execCmd;
 
     const tmpFile = join(tmpDir, fileName);
     writeFileSync(tmpFile, code, "utf-8");
@@ -161,9 +162,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (release) release();
     console.warn("[RunCode] Error in execution handler. Attempting Piston fallback.", err);
     try {
-      const { code, language } = await req.clone().json();
+      const { code, language, fileName: retryFileName } = await req.clone().json();
       if (code && typeof code === "string") {
-        const pistonRes = await executeWithPiston(language || "javascript", code);
+        const pistonRes = await executeWithPiston(language || "javascript", code, retryFileName);
         return NextResponse.json(pistonRes);
       }
     } catch {}
