@@ -95,7 +95,10 @@ Please install dependencies:
 }
 
 // ── Workspace Directory Setup ──
-const WORKSPACE_DIR = path.resolve(options.dir);
+const WORKSPACE_DIR = options.room
+  ? path.join(os.homedir(), ".codetogether", "workspaces", options.room)
+  : path.resolve(options.dir);
+
 if (!fs.existsSync(WORKSPACE_DIR)) {
   try {
     fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
@@ -332,7 +335,7 @@ function spawnLocalPty(terminalId, cols = 80, rows = 24) {
   }
 
   const shell = getDefaultShell();
-  const args = process.platform === "win32" ? [] : ["--login"];
+  const args = [];
 
   let child = null;
   if (nodePty) {
@@ -699,16 +702,40 @@ function connectReverseTunnel(serverUrl, roomId) {
 
   let tunnelWs = null;
   let retryTimer = null;
+  let keepAliveTimer = null;
+
+  function detachTunnel(ws) {
+    for (const session of sessions.values()) {
+      session.subscribers.delete(ws);
+    }
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(connect, 2000);
+  }
 
   function connect() {
     try {
-      tunnelWs = new (require("ws"))(tunnelUrl);
+      if (tunnelWs) {
+        detachTunnel(tunnelWs);
+        try { tunnelWs.close(); } catch {}
+      }
 
-      tunnelWs.on("open", () => {
+      const ws = new (require("ws"))(tunnelUrl);
+      tunnelWs = ws;
+
+      ws.on("open", () => {
         console.log(`\x1b[32m[Tunnel] ✅ Connected to Room "${roomId}"! Local terminal is now live in browser.\x1b[0m`);
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = setInterval(() => {
+          if (ws.readyState === ws.OPEN) {
+            try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
+          }
+        }, 25000);
       });
 
-      tunnelWs.on("message", (raw) => {
+      ws.on("message", (raw) => {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
         if (!msg || typeof msg.type !== "string") return;
@@ -719,20 +746,35 @@ function connectReverseTunnel(serverUrl, roomId) {
           case "attach": {
             const cols = Number(msg.cols) || 80;
             const rows = Number(msg.rows) || 24;
+
+            // Sync room files into the local workspace folder
+            if (Array.isArray(msg.files)) {
+              for (const f of msg.files) {
+                if (f && f.name && !f.isFolder) {
+                  const targetPath = resolveSafePath(f.path || f.name);
+                  if (!targetPath) continue;
+                  try {
+                    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+                    fs.writeFileSync(targetPath, f.content || "", "utf8");
+                  } catch {}
+                }
+              }
+            }
+
             const session = spawnLocalPty(terminalId, cols, rows);
 
             // Re-route session output to tunnel WebSocket
-            session.subscribers.add(tunnelWs);
+            session.subscribers.add(ws);
 
-            if (tunnelWs.readyState === tunnelWs.OPEN) {
-              tunnelWs.send(JSON.stringify({
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({
                 type: "attached",
                 terminalId,
                 shell: defaultShell,
                 workspace: WORKSPACE_DIR,
               }));
               if (session.outputBuffer) {
-                tunnelWs.send(JSON.stringify({
+                ws.send(JSON.stringify({
                   type: "output",
                   terminalId,
                   data: session.outputBuffer,
@@ -768,21 +810,28 @@ function connectReverseTunnel(serverUrl, roomId) {
             }
             break;
           }
+
+          case "ping": {
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify({ type: "pong" }));
+            }
+            break;
+          }
         }
       });
 
-      tunnelWs.on("close", () => {
+      ws.on("close", () => {
+        clearInterval(keepAliveTimer);
+        detachTunnel(ws);
         console.log(`\x1b[33m[Tunnel] Disconnected from room ${roomId}. Reconnecting in 2s...\x1b[0m`);
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(connect, 2000);
+        scheduleReconnect();
       });
 
-      tunnelWs.on("error", (err) => {
+      ws.on("error", (err) => {
         console.warn(`\x1b[33m[Tunnel Error]\x1b[0m ${err.message}`);
       });
     } catch (err) {
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(connect, 2000);
+      scheduleReconnect();
     }
   }
 

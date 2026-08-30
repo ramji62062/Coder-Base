@@ -398,10 +398,11 @@ function handleConnection(ws, req) {
     const agentInfo = { ws, roomId: agentRoomId, shell, platform, createdAt: Date.now() };
     roomAgents.set(agentRoomId, agentInfo);
 
-    // Broadcast agent arrival to all browser terminals in that room
+    // Broadcast agent arrival to all browser terminals in that room and re-bind
+    // any already-open browser tabs to the new tunnel connection.
     for (const [key, subs] of browserSubscribers.entries()) {
       if (key.startsWith(`${agentRoomId}:`)) {
-        const terminalId = key.split(":")[1];
+        const terminalId = key.slice(agentRoomId.length + 1);
         for (const browserWs of subs) {
           safeSend(browserWs, {
             type: "agent:connected",
@@ -411,6 +412,19 @@ function handleConnection(ws, req) {
             platform,
           });
         }
+
+        const attachState = Array.from(subs)
+          .map((browserWs) => browserWs._terminalAttachState?.get(key))
+          .find(Boolean);
+
+        safeSend(ws, {
+          type: "attach",
+          roomId: agentRoomId,
+          terminalId,
+          cols: attachState?.cols || 80,
+          rows: attachState?.rows || 24,
+          files: attachState?.files || [],
+        });
       }
     }
 
@@ -461,10 +475,21 @@ function handleConnection(ws, req) {
             activeIoRef.to(agentRoomId).emit("terminal:files-updated", { roomId: agentRoomId, files: msg.files });
           }
           break;
+
+        case "pong":
+          ws._lastPongAt = Date.now();
+          break;
       }
     });
 
+    const keepAlive = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        safeSend(ws, { type: "ping" });
+      }
+    }, 25000);
+
     ws.on("close", () => {
+      clearInterval(keepAlive);
       console.log(`[tunnel] Local companion disconnected for room ${agentRoomId}`);
       if (roomAgents.get(agentRoomId)?.ws === ws) {
         roomAgents.delete(agentRoomId);
@@ -482,6 +507,7 @@ function handleConnection(ws, req) {
 
   // ── Role B: Browser Client Connection ──
   if (!ws._subs) ws._subs = new Set();
+  if (!ws._terminalAttachState) ws._terminalAttachState = new Map();
 
   ws.on("message", async (raw) => {
     let msg;
@@ -498,6 +524,12 @@ function handleConnection(ws, req) {
 
       switch (msg.type) {
         case "attach":
+          ws._terminalAttachState.set(key, {
+            cols: Number(msg.cols) || 80,
+            rows: Number(msg.rows) || 24,
+            files: Array.isArray(msg.files) ? msg.files : [],
+          });
+
           if (agent && agent.ws.readyState === agent.ws.OPEN) {
             if (!browserSubscribers.has(key)) browserSubscribers.set(key, new Set());
             browserSubscribers.get(key).add(ws);
@@ -509,6 +541,7 @@ function handleConnection(ws, req) {
               terminalId: msg.terminalId || "default",
               cols: msg.cols || 80,
               rows: msg.rows || 24,
+              files: msg.files || [],
             });
 
             safeSend(ws, {
@@ -595,6 +628,7 @@ function handleConnection(ws, req) {
       }
       ws._subs.clear();
     }
+    ws._terminalAttachState?.clear?.();
   });
 
   ws.on("error", () => {});
