@@ -7,6 +7,7 @@ export async function GET(req: NextRequest) {
   const protocol = req.headers.get("x-forwarded-proto") || "http";
   const baseUrl = `${protocol}://${host}`;
   const osParam = req.nextUrl.searchParams.get("os")?.toLowerCase();
+  const roomId = req.nextUrl.searchParams.get("room") || "";
 
   // Windows PowerShell Installer
   if (osParam === "win" || osParam === "windows") {
@@ -44,17 +45,17 @@ Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether" -Name "(Default)
 Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether" -Name "URL Protocol" -Value ""
 New-Item -Path "HKCU:\\Software\\Classes\\codetogether\\shell\\open\\command" -Force | Out-Null
 $vbsPath = Join-Path $ctDir "launch.vbs"
-$vbsContent = "CreateObject(\`"Wscript.Shell\`").Run \`"node \`"\`"" + $agentPath + "\`"\`"\`", 0, False"
+$vbsContent = "CreateObject(\`"Wscript.Shell\`").Run \`"node \`"\`"" + $agentPath + "\`"\`" --server=\`"${baseUrl}\`" --room=\`"${roomId}\`"\`", 0, False"
 Set-Content -Path $vbsPath -Value $vbsContent
 $cmd = "wscript.exe \`"" + $vbsPath + "\`""
 Set-ItemProperty -Path "HKCU:\\Software\\Classes\\codetogether\\shell\\open\\command" -Name "(Default)" -Value $cmd
 
 # Stop any running instances and start
 Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*node*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Process node -ArgumentList "\`"$agentPath\`"" -WindowStyle Hidden
+Start-Process node -ArgumentList "\`"$agentPath\`" --server=\`"${baseUrl}\`" --room=\`"${roomId}\`"" -WindowStyle Hidden
 
 Write-Host "✅ CodeTogether Local Terminal Companion installed and running!" -ForegroundColor Green
-Write-Host "✨ You can now click 'Allow & Launch Terminal' on the website." -ForegroundColor Yellow
+Write-Host "✨ Your local terminal is now connected to CodeTogether!" -ForegroundColor Yellow
 `;
     return new NextResponse(psScript, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -98,9 +99,9 @@ if [ "$(uname)" = "Darwin" ]; then
   APP_DIR="$HOME/Applications/CodeTogetherLauncher.app"
   mkdir -p "$APP_DIR/Contents/MacOS"
   
-  cat << 'LAUNCHER_EOF' > "$APP_DIR/Contents/MacOS/CodeTogetherLauncher"
+  cat << LAUNCHER_EOF > "$APP_DIR/Contents/MacOS/CodeTogetherLauncher"
 #!/bin/bash
-node "$HOME/.codetogether/agent.js" >/dev/null 2>&1 &
+node "$HOME/.codetogether/agent.js" --server="${baseUrl}" --room="${roomId}" >/dev/null 2>&1 &
 LAUNCHER_EOF
   chmod +x "$APP_DIR/Contents/MacOS/CodeTogetherLauncher"
 
@@ -140,7 +141,7 @@ elif [ "$(uname)" = "Linux" ]; then
   cat << LINUX_EOF > "$HOME/.local/share/applications/codetogether.desktop"
 [Desktop Entry]
 Name=CodeTogether Launcher
-Exec=node $HOME/.codetogether/agent.js %u
+Exec=node $HOME/.codetogether/agent.js --server="${baseUrl}" --room="${roomId}" %u
 Type=Application
 Terminal=false
 MimeType=x-scheme-handler/codetogether;
@@ -149,15 +150,15 @@ LINUX_EOF
   update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 fi
 
-# Kill any existing agent to prevent port conflicts
+# Kill any existing agent to prevent duplicate processes
 pkill -f "$HOME/.codetogether/agent.js" 2>/dev/null || true
 sleep 0.5
 
-# Launch in background
-nohup node "$HOME/.codetogether/agent.js" > "$HOME/.codetogether/agent.log" 2>&1 &
+# Launch in background with server and room parameters
+nohup node "$HOME/.codetogether/agent.js" --server="${baseUrl}" --room="${roomId}" > "$HOME/.codetogether/agent.log" 2>&1 &
 
 echo "✅ CodeTogether Local Terminal Companion installed and running!"
-echo "✨ You can now click 'Allow & Launch Terminal' on the website."
+echo "✨ Your local terminal is now connected to CodeTogether!"
 `;
 
   return new NextResponse(script, {

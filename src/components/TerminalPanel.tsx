@@ -664,6 +664,24 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
               if (tab?.terminalId === msg.terminalId) r.attached = true;
             });
             break;
+          case "agent:connected": {
+            setIsLocalShell(true);
+            if (msg.shell) setShellName(msg.shell.split("/").pop() || msg.shell);
+            onOutputLogRef.current?.("\r\n[tunnel] Local companion terminal connected to room");
+            for (const tab of tabsRef.current) {
+              const rt = runtimesRef.current.get(tab.id);
+              if (rt) {
+                rt.attached = false;
+                attachTerminal(tab.id, tab.terminalId);
+              }
+            }
+            break;
+          }
+          case "agent:disconnected": {
+            setIsLocalShell(false);
+            onOutputLogRef.current?.("\r\n[tunnel] Local companion terminal disconnected");
+            break;
+          }
           case "output": {
             const tab = tabsRef.current.find((t) => t.terminalId === msg.terminalId);
             const rt = tab ? runtimesRef.current.get(tab.id) : null;
@@ -1010,9 +1028,9 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
 
                 {(() => {
                   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
-                  let cmd = `curl -fsSL ${origin}/api/agent/install | bash`;
+                  let cmd = `curl -fsSL "${origin}/api/agent/install?room=${roomId}" | bash`;
                   if (platformTab === "win") {
-                    cmd = `irm ${origin}/api/agent/install?os=win | iex`;
+                    cmd = `irm "${origin}/api/agent/install?os=win&room=${roomId}" | iex`;
                   }
 
                   return (

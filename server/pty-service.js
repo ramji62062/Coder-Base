@@ -378,7 +378,109 @@ async function onAttach(ws, send, msg) {
   inc("terminal_attach_ok");
 }
 
-function handleConnection(ws) {
+/** @type {Map<string, { ws: any, roomId: string, shell: string, platform: string, createdAt: number }>} */
+const roomAgents = new Map();
+
+/** @type {Map<string, Set<any>>} `${roomId}:${terminalId}` -> Set of browser WebSocket connections */
+const browserSubscribers = new Map();
+
+function handleConnection(ws, req) {
+  const url = req ? new URL(req.url, "http://localhost") : null;
+  const role = url ? url.searchParams.get("role") : null;
+  const agentRoomId = url ? url.searchParams.get("roomId") : null;
+
+  // ── Role A: Local Agent Reverse Tunnel Connection (from user's PC) ──
+  if (role === "agent" && agentRoomId) {
+    const shell = url.searchParams.get("shell") || "zsh";
+    const platform = url.searchParams.get("platform") || process.platform;
+    console.log(`[tunnel] Local companion connected for room ${agentRoomId} (${shell}, ${platform})`);
+
+    const agentInfo = { ws, roomId: agentRoomId, shell, platform, createdAt: Date.now() };
+    roomAgents.set(agentRoomId, agentInfo);
+
+    // Broadcast agent arrival to all browser terminals in that room
+    for (const [key, subs] of browserSubscribers.entries()) {
+      if (key.startsWith(`${agentRoomId}:`)) {
+        const terminalId = key.split(":")[1];
+        for (const browserWs of subs) {
+          safeSend(browserWs, {
+            type: "agent:connected",
+            roomId: agentRoomId,
+            terminalId,
+            shell,
+            platform,
+          });
+        }
+      }
+    }
+
+    ws.on("message", (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw.toString()); } catch { return; }
+      if (!msg || typeof msg.type !== "string") return;
+
+      const terminalId = msg.terminalId || "default";
+      const key = `${agentRoomId}:${terminalId}`;
+      const subs = browserSubscribers.get(key);
+
+      switch (msg.type) {
+        case "output":
+          if (subs) {
+            for (const browserWs of subs) {
+              safeSend(browserWs, { type: "output", roomId: agentRoomId, terminalId, data: msg.data });
+            }
+          }
+          break;
+
+        case "exit":
+          if (subs) {
+            for (const browserWs of subs) {
+              safeSend(browserWs, { type: "exit", roomId: agentRoomId, terminalId, exitCode: msg.exitCode });
+            }
+          }
+          break;
+
+        case "attached":
+          if (subs) {
+            for (const browserWs of subs) {
+              safeSend(browserWs, {
+                type: "attached",
+                ok: true,
+                roomId: agentRoomId,
+                terminalId,
+                isLocal: true,
+                shell: msg.shell || shell,
+                workspace: msg.workspace || "Local Machine",
+              });
+            }
+          }
+          break;
+
+        case "files:sync":
+          if (msg.files && activeIoRef) {
+            activeIoRef.to(agentRoomId).emit("terminal:files-updated", { roomId: agentRoomId, files: msg.files });
+          }
+          break;
+      }
+    });
+
+    ws.on("close", () => {
+      console.log(`[tunnel] Local companion disconnected for room ${agentRoomId}`);
+      if (roomAgents.get(agentRoomId)?.ws === ws) {
+        roomAgents.delete(agentRoomId);
+        for (const [key, subs] of browserSubscribers.entries()) {
+          if (key.startsWith(`${agentRoomId}:`)) {
+            for (const browserWs of subs) {
+              safeSend(browserWs, { type: "agent:disconnected", roomId: agentRoomId });
+            }
+          }
+        }
+      }
+    });
+    return;
+  }
+
+  // ── Role B: Browser Client Connection ──
   if (!ws._subs) ws._subs = new Set();
 
   ws.on("message", async (raw) => {
@@ -391,32 +493,68 @@ function handleConnection(ws) {
     if (!msg || typeof msg.type !== "string") return;
 
     try {
+      const agent = msg.roomId ? roomAgents.get(msg.roomId) : null;
+      const key = `${msg.roomId}:${msg.terminalId || "default"}`;
+
       switch (msg.type) {
         case "attach":
-          await onAttach(ws, (o) => safeSend(ws, o), msg);
+          if (agent && agent.ws.readyState === agent.ws.OPEN) {
+            if (!browserSubscribers.has(key)) browserSubscribers.set(key, new Set());
+            browserSubscribers.get(key).add(ws);
+            ws._subs.add(key);
+
+            safeSend(agent.ws, {
+              type: "attach",
+              roomId: msg.roomId,
+              terminalId: msg.terminalId || "default",
+              cols: msg.cols || 80,
+              rows: msg.rows || 24,
+            });
+
+            safeSend(ws, {
+              type: "attached",
+              ok: true,
+              roomId: msg.roomId,
+              terminalId: msg.terminalId || "default",
+              isLocal: true,
+              shell: agent.shell,
+              workspace: "Local Machine",
+            });
+          } else {
+            if (!browserSubscribers.has(key)) browserSubscribers.set(key, new Set());
+            browserSubscribers.get(key).add(ws);
+            ws._subs.add(key);
+            await onAttach(ws, (o) => safeSend(ws, o), msg);
+          }
           break;
 
         case "input": {
-          const session = sessions.get(sessionKey(msg.roomId, msg.terminalId));
-          if (session && session.alive && typeof msg.data === "string" && msg.data.length) {
-            // RAW byte pipe. No line buffering, no transformation — control
-            // characters and arrow keys must reach the pty untouched.
-            session.pty.write(msg.data);
-            touchActivity(session.roomId);
+          if (agent && agent.ws.readyState === agent.ws.OPEN) {
+            safeSend(agent.ws, { type: "input", terminalId: msg.terminalId, data: msg.data });
+          } else {
+            const session = sessions.get(sessionKey(msg.roomId, msg.terminalId));
+            if (session && session.alive && typeof msg.data === "string" && msg.data.length) {
+              session.pty.write(msg.data);
+              touchActivity(session.roomId);
+            }
           }
           break;
         }
 
         case "resize": {
-          const session = sessions.get(sessionKey(msg.roomId, msg.terminalId));
-          const cols = Number(msg.cols) || 80;
-          const rows = Number(msg.rows) || 24;
-          if (session && session.alive) {
-            try {
-              session.pty.resize(cols, rows);
-              session.cols = cols;
-              session.rows = rows;
-            } catch {}
+          if (agent && agent.ws.readyState === agent.ws.OPEN) {
+            safeSend(agent.ws, { type: "resize", terminalId: msg.terminalId, cols: msg.cols, rows: msg.rows });
+          } else {
+            const session = sessions.get(sessionKey(msg.roomId, msg.terminalId));
+            const cols = Number(msg.cols) || 80;
+            const rows = Number(msg.rows) || 24;
+            if (session && session.alive) {
+              try {
+                session.pty.resize(cols, rows);
+                session.cols = cols;
+                session.rows = rows;
+              } catch {}
+            }
           }
           break;
         }
@@ -430,7 +568,11 @@ function handleConnection(ws) {
           break;
 
         case "kill":
-          destroySession(msg.roomId, msg.terminalId);
+          if (agent && agent.ws.readyState === agent.ws.OPEN) {
+            safeSend(agent.ws, { type: "kill", terminalId: msg.terminalId });
+          } else {
+            destroySession(msg.roomId, msg.terminalId);
+          }
           safeSend(ws, { type: "killed", terminalId: msg.terminalId });
           break;
 
@@ -444,10 +586,10 @@ function handleConnection(ws) {
   });
 
   ws.on("close", () => {
-    // Persist the pty across disconnects: just drop this subscriber; the
-    // process keeps running server-side and will be re-attached on reconnect.
     if (ws._subs) {
       for (const key of ws._subs) {
+        const subs = browserSubscribers.get(key);
+        if (subs) subs.delete(ws);
         const session = sessions.get(key);
         if (session) session.subscribers.delete(ws);
       }
@@ -459,7 +601,7 @@ function handleConnection(ws) {
 }
 
 function safeSend(ws, obj) {
-  if (ws.readyState === ws.OPEN) {
+  if (ws && ws.readyState === ws.OPEN) {
     try { ws.send(JSON.stringify(obj)); } catch {}
   }
 }

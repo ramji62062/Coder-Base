@@ -116,7 +116,7 @@ function startServer(port) {
     const wss = new WebSocketServer({ noServer: true });
     wss.on("connection", (ws, req) => {
       const pathname = new URL(req.url, "http://localhost").pathname;
-      if (pathname === "/ws/terminal") ptyService.handleConnection(ws);
+      if (pathname === "/ws/terminal") ptyService.handleConnection(ws, req);
       else if (pathname === "/ws/lsp") lspService.handleConnection(ws, req);
       else ws.close();
     });

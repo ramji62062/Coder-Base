@@ -20,6 +20,8 @@ function parseArgs() {
     host: "127.0.0.1",
     dir: process.cwd(),
     token: "",
+    room: "",
+    server: "",
     help: false,
   };
 
@@ -33,6 +35,10 @@ function parseArgs() {
       options.token = args[++i];
     } else if (arg === "-h" || arg === "--host") {
       options.host = args[++i];
+    } else if (arg === "-r" || arg.startsWith("--room")) {
+      options.room = arg.includes("=") ? arg.split("=")[1] : args[++i];
+    } else if (arg === "-s" || arg.startsWith("--server")) {
+      options.server = arg.includes("=") ? arg.split("=")[1] : args[++i];
     } else if (arg === "--help") {
       options.help = true;
     }
@@ -672,29 +678,131 @@ wss.on("connection", (ws, req) => {
   ws.on("error", () => {});
 });
 
+// ── Reverse Tunnel to Cloud Server ──
+function connectReverseTunnel(serverUrl, roomId) {
+  if (!serverUrl || !roomId) return;
+  const wsProto = serverUrl.startsWith("https") ? "wss:" : "ws:";
+  const host = serverUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const defaultShell = getDefaultShell();
+  const tunnelUrl = `${wsProto}//${host}/ws/terminal?role=agent&roomId=${encodeURIComponent(roomId)}&shell=${encodeURIComponent(defaultShell)}&platform=${process.platform}`;
+
+  console.log(`\x1b[36m[Tunnel] Connecting to CodeTogether Room "${roomId}" at ${wsProto}//${host}...\x1b[0m`);
+
+  let tunnelWs = null;
+  let retryTimer = null;
+
+  function connect() {
+    try {
+      tunnelWs = new (require("ws"))(tunnelUrl);
+
+      tunnelWs.on("open", () => {
+        console.log(`\x1b[32m[Tunnel] ✅ Connected to Room "${roomId}"! Local terminal is now live in browser.\x1b[0m`);
+      });
+
+      tunnelWs.on("message", (raw) => {
+        let msg;
+        try { msg = JSON.parse(raw.toString()); } catch { return; }
+        if (!msg || typeof msg.type !== "string") return;
+
+        const terminalId = msg.terminalId || "default";
+
+        switch (msg.type) {
+          case "attach": {
+            const cols = Number(msg.cols) || 80;
+            const rows = Number(msg.rows) || 24;
+            const session = spawnLocalPty(terminalId, cols, rows);
+
+            // Re-route session output to tunnel WebSocket
+            session.subscribers.add(tunnelWs);
+
+            if (tunnelWs.readyState === tunnelWs.OPEN) {
+              tunnelWs.send(JSON.stringify({
+                type: "attached",
+                terminalId,
+                shell: defaultShell,
+                workspace: WORKSPACE_DIR,
+              }));
+              if (session.outputBuffer) {
+                tunnelWs.send(JSON.stringify({
+                  type: "output",
+                  terminalId,
+                  data: session.outputBuffer,
+                }));
+              }
+            }
+            break;
+          }
+
+          case "input": {
+            const session = sessions.get(terminalId);
+            if (session && session.alive && typeof msg.data === "string") {
+              session.pty.write(msg.data);
+            }
+            break;
+          }
+
+          case "resize": {
+            const session = sessions.get(terminalId);
+            const cols = Number(msg.cols) || 80;
+            const rows = Number(msg.rows) || 24;
+            if (session && session.alive) {
+              try { session.pty.resize(cols, rows); } catch {}
+            }
+            break;
+          }
+
+          case "kill": {
+            const session = sessions.get(terminalId);
+            if (session) {
+              try { session.pty.kill(); } catch {}
+              sessions.delete(terminalId);
+            }
+            break;
+          }
+        }
+      });
+
+      tunnelWs.on("close", () => {
+        console.log(`\x1b[33m[Tunnel] Disconnected from room ${roomId}. Reconnecting in 2s...\x1b[0m`);
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(connect, 2000);
+      });
+
+      tunnelWs.on("error", (err) => {
+        console.warn(`\x1b[33m[Tunnel Error]\x1b[0m ${err.message}`);
+      });
+    } catch (err) {
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(connect, 2000);
+    }
+  }
+
+  connect();
+}
+
 // ── Startup & Port Listening ──
 function startListening(port) {
   server.listen(port, options.host, () => {
     const defaultShell = getDefaultShell();
     console.log(`
 \x1b[1;32m===============================================================\x1b[0m
-\x1b[1;36m  🚀 CodeTogether Local Agent is Running\x1b[0m
+\x1b[1;36m  🚀 CodeTogether Local Companion is Running\x1b[0m
 \x1b[1;32m===============================================================\x1b[0m
 
   \x1b[1mWorkspace Path:\x1b[0m   \x1b[33m${WORKSPACE_DIR}\x1b[0m
-  \x1b[1mWebSocket URL:\x1b[0m    \x1b[36mws://${options.host}:${port}\x1b[0m
-  \x1b[1mSecurity Token:\x1b[0m   \x1b[35m${authToken}\x1b[0m
+  \x1b[1mLocal URL:\x1b[0m        \x1b[36mws://${options.host}:${port}\x1b[0m
   \x1b[1mDefault Shell:\x1b[0m    \x1b[37m${defaultShell}\x1b[0m
   \x1b[1mPTY Engine:\x1b[0m       \x1b[32m${nodePty ? "node-pty (Real PTY)" : "child_process (fallback)"}\x1b[0m
+${options.room ? `  \x1b[1mRoom Tunnel:\x1b[0m      \x1b[35m${options.room}\x1b[0m` : ""}
 
 \x1b[1;30m---------------------------------------------------------------\x1b[0m
-\x1b[1;37m  In CodeTogether Browser UI:\x1b[0m
-  1. Open the Terminal panel and select \x1b[1mLocal Terminal\x1b[0m.
-  2. Click \x1b[1mConnect Local Terminal\x1b[0m.
-  3. Confirm the permission dialog to grant execution access.
-  4. Paste the Security Token above if requested.
+\x1b[1;37m  Your local terminal is now connected to CodeTogether!\x1b[0m
 \x1b[1;32m===============================================================\x1b[0m
 `);
+
+    if (options.room && options.server) {
+      connectReverseTunnel(options.server, options.room);
+    }
   });
 
   server.on("error", (err) => {
