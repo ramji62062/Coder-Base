@@ -177,6 +177,9 @@ export default function TerminalPanel({
 
   const getActiveTab = useCallback(() => tabs.find((t) => t.id === activeTabId), [tabs, activeTabId]);
 
+  const isLocalShellRef = useRef(isLocalShell);
+  isLocalShellRef.current = isLocalShell;
+
   // ── WebSocket helpers ──
   const sendWs = useCallback((obj: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -185,20 +188,32 @@ export default function TerminalPanel({
   }, []);
 
   const sendInput = useCallback((tid: string, data: string) => {
-    sendWs({ type: "input", roomId, terminalId: tid, data });
+    if (isLocalShellRef.current && localAgentClient.isConnected()) {
+      localAgentClient.sendInput(tid, data);
+    } else {
+      sendWs({ type: "input", roomId, terminalId: tid, data });
+    }
   }, [roomId, sendWs]);
 
-  // ── Attach a tab to the server-side PTY ──
+  // ── Attach a tab to the terminal (Local Agent or Server PTY) ──
   const attachTerminal = useCallback(async (tabId: string, terminalId: string) => {
     const rt = runtimesRef.current.get(tabId);
-    const ws = wsRef.current;
-    if (!rt || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const token = await getAuthToken();
+    if (!rt) return;
 
     rt.fit.fit();
     rt.attached = true;
     (rt as any)._lastAttachTime = Date.now();
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, attached: true } : t)));
+
+    // Route to Local Agent if connected
+    if (isLocalShellRef.current && localAgentClient.isConnected()) {
+      localAgentClient.attachTerminal(terminalId, rt.term.cols, rt.term.rows);
+      return;
+    }
+
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const token = await getAuthToken();
 
     sendWs({
       type: "attach",
@@ -312,12 +327,18 @@ export default function TerminalPanel({
 
     term.onData((data) => {
       const tab = tabsRef.current.find((t) => t.id === tabId);
-      if (tab) sendWs({ type: "input", roomId, terminalId: tab.terminalId, data });
+      if (tab) sendInput(tab.terminalId, data);
     });
 
     const tab = tabsRef.current.find((t) => t.id === tabId);
-    if (tab && wsRef.current?.readyState === WebSocket.OPEN) attachTerminal(tabId, tab.terminalId);
-  }, [attachTerminal, roomId, sendWs]);
+    if (tab) {
+      if (isLocalShellRef.current && localAgentClient.isConnected()) {
+        attachTerminal(tabId, tab.terminalId);
+      } else if (wsRef.current?.readyState === WebSocket.OPEN) {
+        attachTerminal(tabId, tab.terminalId);
+      }
+    }
+  }, [attachTerminal, sendInput]);
 
   const resizeActive = useCallback(() => {
     const tab = getActiveTab();
@@ -452,17 +473,50 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     const tab = getActiveTab();
     if (!rt || !tab) return;
 
-    if (rt.attached) {
-      await executeRunCommand();
+    const currentFiles = filesRef.current || [];
+    const activeContent = (codeRef && codeRef.current) !== undefined ? codeRef.current : "";
+    const currentCode = activeContent || currentFiles.find((f) => normalizePath(f.path || f.name) === normalizePath(activeFileName))?.content || "";
+
+    // 1. If Local Companion Terminal is connected -> execute in user's real local shell!
+    if (isLocalShellRef.current && localAgentClient.isConnected()) {
+      const projectRoot = findProjectRoot(currentFiles, activeFileName);
+      const execCmd = computeRunCommand(language, activeFileName, currentCode);
+      const prefix = projectRoot && projectRoot !== "." ? `cd "${projectRoot}" && ` : "";
+      rt.term.write(`\r\n\x1b[36m# Running locally: ${execCmd}\x1b[0m\r\n`);
+      localAgentClient.sendInput(tab.terminalId, `${prefix}${execCmd}\n`);
       return;
     }
 
-    // Attach and execute
-    await attachTerminal(tab.id, tab.terminalId);
-    setTimeout(() => {
-      void executeRunCommand();
-    }, 600);
-  }, [activeTabId, attachTerminal, executeRunCommand, getActiveTab]);
+    // 2. Fallback to Piston Execution Engine for 100% reliable execution everywhere!
+    rt.term.write(`\r\n\x1b[1;36m▶ Running ${activeFileName || "code"} via Piston Execution Engine...\x1b[0m\r\n`);
+    try {
+      const res = await fetch("/api/run-code", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          code: currentCode,
+          language,
+          fileName: activeFileName,
+        }),
+      });
+      const data = await readJson(res);
+      if (data) {
+        if (data.stdout) {
+          rt.term.write(data.stdout.replace(/\r?\n/g, "\r\n"));
+        }
+        if (data.stderr) {
+          rt.term.write(`\x1b[31m${data.stderr.replace(/\r?\n/g, "\r\n")}\x1b[0m`);
+        }
+        const exitCode = data.exitCode ?? 0;
+        const statusColor = exitCode === 0 ? "\x1b[32m" : "\x1b[31m";
+        rt.term.write(`\r\n${statusColor}[Process exited with code ${exitCode}]\x1b[0m\r\n`);
+      } else {
+        rt.term.write(`\r\n\x1b[31m[Execution returned no response]\x1b[0m\r\n`);
+      }
+    } catch (err: any) {
+      rt.term.write(`\r\n\x1b[31m[Execution Error: ${err.message}]\x1b[0m\r\n`);
+    }
+  }, [activeFileName, activeTabId, codeRef, getActiveTab, language]);
 
   const stopTerminal = useCallback(() => {
     const tab = getActiveTab();
@@ -515,6 +569,58 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
     socket.on("disconnect", () => socket.emit("terminal:leave-room", { roomId }));
     return () => { socket.emit("terminal:leave-room", { roomId }); socket.disconnect(); socketRef.current = null; };
   }, [roomId, onFilesSync]);
+
+  // ── Local Agent Client Listeners & Auto-Probe ──
+  useEffect(() => {
+    localAgentClient.setListeners({
+      onTerminalOutput: (tid, data) => {
+        const tab = tabsRef.current.find((t) => t.terminalId === tid);
+        const rt = tab ? runtimesRef.current.get(tab.id) : null;
+        if (rt) {
+          rt.term.write(data);
+          onOutputLogRef.current?.(data);
+          const foundUrls = extractLocalUrls(data);
+          if (foundUrls.length > 0) {
+            setDetectedUrls((prev) => Array.from(new Set([...prev, ...foundUrls])));
+          }
+        }
+      },
+      onTerminalExit: (tid, exitCode) => {
+        const tab = tabsRef.current.find((t) => t.terminalId === tid);
+        const rt = tab ? runtimesRef.current.get(tab.id) : null;
+        if (rt) {
+          rt.term.writeln(`\r\n\x1b[90m[Local process exited with code ${exitCode}]\x1b[0m`);
+        }
+      },
+      onFilesUpdated: (newFiles) => {
+        filesRef.current = newFiles;
+        onFilesSyncRef.current?.(newFiles);
+      },
+      onStatusChange: (status, info) => {
+        if (status === "connected") {
+          setIsLocalShell(true);
+          if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
+        } else if (status === "disconnected") {
+          setIsLocalShell(false);
+        }
+      },
+    });
+
+    // Auto-probe if companion is already running locally on user's machine
+    localAgentClient.connect("ws://127.0.0.1:8765", "", 1200).then((info) => {
+      if (info && mountedRef.current) {
+        setIsLocalShell(true);
+        if (info.shell) setShellName(info.shell.split("/").pop() || info.shell);
+        for (const tab of tabsRef.current) {
+          const rt = runtimesRef.current.get(tab.id);
+          if (rt) {
+            rt.attached = false;
+            attachTerminal(tab.id, tab.terminalId);
+          }
+        }
+      }
+    }).catch(() => {});
+  }, [attachTerminal]);
 
   // ── Terminal WebSocket ──
   useEffect(() => {

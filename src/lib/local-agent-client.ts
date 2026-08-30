@@ -90,7 +90,7 @@ export class LocalAgentClient {
     this.listeners = { ...this.listeners, ...listeners };
   }
 
-  public connect(url = this.currentUrl, token = this.currentToken): Promise<LocalAgentInfo> {
+  public connect(url = this.currentUrl, token = this.currentToken, timeoutMs = 5000): Promise<LocalAgentInfo> {
     this.currentUrl = url || DEFAULT_AGENT_URL;
     this.currentToken = token || "";
     this.shouldReconnect = true;
@@ -126,7 +126,7 @@ export class LocalAgentClient {
             try { ws.close(); } catch {}
             reject(new Error("Connection timed out."));
           }
-        }, 6000);
+        }, timeoutMs);
 
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: "auth", token: this.currentToken || "" }));
