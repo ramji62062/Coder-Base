@@ -22,6 +22,7 @@ function parseArgs() {
     token: "",
     room: "",
     server: "",
+    pairToken: "",
     help: false,
   };
 
@@ -32,6 +33,7 @@ function parseArgs() {
         const launchUrl = new URL(arg);
         options.room = launchUrl.searchParams.get("roomId") || launchUrl.searchParams.get("room") || options.room;
         options.server = launchUrl.searchParams.get("server") || options.server;
+        options.pairToken = launchUrl.searchParams.get("pairToken") || launchUrl.searchParams.get("pair") || options.pairToken;
         options.token = launchUrl.searchParams.get("token") || options.token;
         options.port = parseInt(launchUrl.searchParams.get("port") || "", 10) || options.port;
       } catch {}
@@ -47,6 +49,8 @@ function parseArgs() {
       options.room = arg.includes("=") ? arg.split("=")[1] : args[++i];
     } else if (arg === "-s" || arg.startsWith("--server")) {
       options.server = arg.includes("=") ? arg.split("=")[1] : args[++i];
+    } else if (arg === "--pair-token" || arg.startsWith("--pair-token=")) {
+      options.pairToken = arg.includes("=") ? arg.split("=")[1] : args[++i];
     } else if (arg === "--help") {
       options.help = true;
     }
@@ -718,7 +722,7 @@ function connectReverseTunnel(serverUrl, roomId) {
   const wsProto = serverUrl.startsWith("https") ? "wss:" : "ws:";
   const host = serverUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
   const defaultShell = getDefaultShell();
-  const tunnelUrl = `${wsProto}//${host}/ws/terminal?role=agent&roomId=${encodeURIComponent(roomId)}&shell=${encodeURIComponent(defaultShell)}&platform=${process.platform}`;
+  const tunnelUrl = `${wsProto}//${host}/ws/terminal?role=agent&roomId=${encodeURIComponent(roomId)}&pairToken=${encodeURIComponent(options.pairToken)}&shell=${encodeURIComponent(defaultShell)}&platform=${process.platform}`;
 
   console.log(`\x1b[36m[Tunnel] Connecting to CodeTogether Room "${roomId}" at ${wsProto}//${host}...\x1b[0m`);
 

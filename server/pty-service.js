@@ -59,6 +59,7 @@ const {
   touchActivity,
 } = require("./terminal-service");
 const { validateTerminalAccess } = require("./terminal-auth");
+const { consumePairing } = require("./agent-pairing");
 const { inc, recordError } = require("./metrics");
 
 const MAX_OUTPUT_BUFFER = 512 * 1024;
@@ -391,6 +392,15 @@ function handleConnection(ws, req) {
 
   // ── Role A: Local Agent Reverse Tunnel Connection (from user's PC) ──
   if (role === "agent" && agentRoomId) {
+    const pairToken = url.searchParams.get("pairToken") || url.searchParams.get("pair") || "";
+    const pairing = consumePairing(pairToken, agentRoomId);
+    if (!pairing.ok && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      console.warn(`[tunnel] Rejecting local companion for room ${agentRoomId}: ${pairing.error}`);
+      safeSend(ws, { type: "auth:error", error: pairing.error });
+      ws.close(4001, pairing.error);
+      return;
+    }
+
     const shell = url.searchParams.get("shell") || "zsh";
     const platform = url.searchParams.get("platform") || process.platform;
     console.log(`[tunnel] Local companion connected for room ${agentRoomId} (${shell}, ${platform})`);

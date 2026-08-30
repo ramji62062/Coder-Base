@@ -153,6 +153,7 @@ export default function TerminalPanel({
   const [agentConnecting, setAgentConnecting] = useState(false);
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [platformTab, setPlatformTab] = useState<"mac" | "linux" | "win">("mac");
+  const [pairToken, setPairToken] = useState("");
 
   // ── Detected Localhost URLs ──
   const [detectedUrls, setDetectedUrls] = useState<string[]>([]);
@@ -263,6 +264,19 @@ export default function TerminalPanel({
   // ── Approach B Launcher Handlers ──
   const handleLaunchProtocol = useCallback(async () => {
     setAgentConnecting(true);
+    let freshPairToken = pairToken;
+    try {
+      const res = await fetch("/api/agent/pair", {
+        method: "POST",
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ roomId }),
+      });
+      const data = await readJson(res);
+      if (data?.token) {
+        freshPairToken = data.token;
+        setPairToken(data.token);
+      }
+    } catch {}
 
     // 1. Immediate direct connect check (instant if agent is already running)
     if (canUseDirectLocalAgent()) {
@@ -288,7 +302,7 @@ export default function TerminalPanel({
     }
 
     // 2. Trigger OS protocol launch handler
-    localAgentClient.triggerProtocolLaunch(roomId);
+    localAgentClient.triggerProtocolLaunch(roomId, 8765, "", freshPairToken);
 
     if (!canUseDirectLocalAgent()) {
       setTimeout(() => setAgentConnecting(false), 8000);
@@ -324,7 +338,7 @@ export default function TerminalPanel({
         setAgentConnecting(false);
       }
     }, 400);
-  }, [attachTerminal, roomId]);
+  }, [attachTerminal, pairToken, roomId]);
 
   // ── Init xterm for a tab ──
   const initTerminalForTab = useCallback((tabId: string, container: HTMLDivElement) => {
@@ -871,6 +885,23 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
   }, [scaffoldOpen]);
 
   useEffect(() => {
+    if (!showLocalModal) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/agent/pair", {
+          method: "POST",
+          headers: await getAuthHeaders(),
+          body: JSON.stringify({ roomId }),
+        });
+        const data = await readJson(res);
+        if (!cancelled && data?.token) setPairToken(data.token);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [roomId, showLocalModal]);
+
+  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -1097,9 +1128,10 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
 
                 {(() => {
                   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
-                  let cmd = `curl -fsSL "${origin}/api/agent/install?room=${roomId}" | bash`;
+                  const pairParam = pairToken ? `&pairToken=${encodeURIComponent(pairToken)}` : "";
+                  let cmd = `curl -fsSL "${origin}/api/agent/install?room=${roomId}${pairParam}" | bash`;
                   if (platformTab === "win") {
-                    cmd = `irm "${origin}/api/agent/install?os=win&room=${roomId}" | iex`;
+                    cmd = `irm "${origin}/api/agent/install?os=win&room=${roomId}${pairParam}" | iex`;
                   }
 
                   return (

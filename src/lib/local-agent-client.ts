@@ -443,9 +443,9 @@ export class LocalAgentClient {
     }, 3000);
   }
 
-  public triggerProtocolLaunch(roomId: string, port = 8765, token = "") {
+  public triggerProtocolLaunch(roomId: string, port = 8765, token = "", pairToken = "") {
     if (typeof window === "undefined") return;
-    const launchUrl = `codetogether://connect?roomId=${encodeURIComponent(roomId)}&server=${encodeURIComponent(window.location.origin)}&port=${port}&token=${encodeURIComponent(token)}`;
+    const launchUrl = `codetogether://connect?roomId=${encodeURIComponent(roomId)}&server=${encodeURIComponent(window.location.origin)}&port=${port}&token=${encodeURIComponent(token)}&pairToken=${encodeURIComponent(pairToken)}`;
     try {
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
