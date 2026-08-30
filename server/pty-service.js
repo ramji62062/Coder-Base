@@ -157,7 +157,7 @@ async function spawnLocalPty(roomId, terminalId, cols, rows, files) {
   syncFilesToWorkspace(roomId, files);
 
   const shell = detectValidShell();
-  const args = process.platform === "win32" ? [] : (shell.endsWith("sh") || shell.endsWith("bash") || shell.endsWith("zsh") ? ["-l"] : []);
+  const args = process.platform === "win32" ? [] : ["--norc", "--noprofile"];
 
   let wrapper;
   try {
