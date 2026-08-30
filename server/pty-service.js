@@ -570,10 +570,11 @@ function handleConnection(ws, req) {
             });
 
             safeSend(ws, {
-              type: "agent:connecting",
+              type: "agent:connected",
               roomId: msg.roomId,
               terminalId: msg.terminalId || "default",
               shell: agent.shell,
+              platform: agent.platform,
             });
           } else {
             if (!browserSubscribers.has(key)) browserSubscribers.set(key, new Set());
@@ -638,6 +639,19 @@ function handleConnection(ws, req) {
           safeSend(ws, { type: "killed", terminalId: msg.terminalId });
           break;
 
+        case "agent:status": {
+          const roomId = msg.roomId;
+          const ag = roomId ? roomAgents.get(roomId) : null;
+          safeSend(ws, {
+            type: "agent:status",
+            roomId,
+            connected: Boolean(ag && ag.ws.readyState === ag.ws.OPEN),
+            shell: ag?.shell || null,
+            platform: ag?.platform || null,
+          });
+          break;
+        }
+
         default:
           break;
       }
@@ -669,6 +683,14 @@ function safeSend(ws, obj) {
   }
 }
 
+function isAgentConnected(roomId) {
+  const agent = roomId ? roomAgents.get(roomId) : null;
+  if (agent && agent.ws.readyState === agent.ws.OPEN) {
+    return { connected: true, shell: agent.shell, platform: agent.platform };
+  }
+  return { connected: false, shell: null, platform: null };
+}
+
 module.exports = {
   handleConnection,
   setActiveIo,
@@ -676,4 +698,5 @@ module.exports = {
   getDevServerUrl,
   destroySession,
   spawnLocalPty,
+  isAgentConnected,
 };

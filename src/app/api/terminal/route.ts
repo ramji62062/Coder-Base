@@ -8,6 +8,7 @@ import { Dirent, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync }
 import { execFileSync } from "child_process";
 
 const terminalService = require("../../../../server/terminal-service.js");
+const ptyService = require("../../../../server/pty-service.js");
 
 type WorkspaceFile = {
   name: string;
@@ -206,6 +207,12 @@ export async function POST(req: NextRequest) {
     if (action === "status") {
       const dockerReady = await terminalService.checkDockerReady();
       return NextResponse.json({ dockerReady });
+    }
+
+    if (action === "agent-status") {
+      const roomId = body.roomId;
+      const agentStatus = ptyService.isAgentConnected(roomId);
+      return NextResponse.json(agentStatus);
     }
 
     if (action === "sync-files") {

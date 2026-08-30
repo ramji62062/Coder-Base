@@ -288,7 +288,7 @@ export default function TerminalPanel({
       }
     } catch {}
 
-    // 1. Immediate direct connect check (instant if agent is already running)
+    // 1. If on localhost, try direct connect first (instant if agent is already running)
     if (canUseDirectLocalAgent()) {
       try {
         await localAgentClient.connect("ws://127.0.0.1:8765");
@@ -311,42 +311,48 @@ export default function TerminalPanel({
       } catch {}
     }
 
-    // 2. Trigger OS protocol launch handler
-    localAgentClient.triggerProtocolLaunch(roomId, 8765, "", freshPairToken);
-
-    if (!canUseDirectLocalAgent()) {
-      setTimeout(() => setAgentConnecting(false), 8000);
-      return;
-    }
-
-    // 3. Fast poll for agent startup & connect
+    // 2. On production (Render), poll the server for agent tunnel connection
+    //    The user needs to run the install command first
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
+
+      // Check if agent connected via tunnel (server reports it)
       try {
-        await localAgentClient.connect("ws://127.0.0.1:8765");
-        if (localAgentClient.isConnected()) {
-          clearInterval(interval);
-          setAgentConnecting(false);
-          setShowLocalModal(false);
-          setIsLocalShell(true);
-          const info = localAgentClient.getAgentInfo();
-          if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
-          for (const tab of tabsRef.current) {
-            const rt = runtimesRef.current.get(tab.id);
-            if (rt && !rt.attached && !(rt as any)._attaching) {
-              attachTerminal(tab.id, tab.terminalId);
-            }
-          }
-          onOutputLogRef.current?.("[terminal] Successfully connected to personal local terminal via CodeTogether Agent");
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "agent:status", roomId }));
         }
       } catch {}
 
-      if (attempts >= 20) {
+      // Also try direct connection (works on localhost)
+      if (canUseDirectLocalAgent()) {
+        try {
+          await localAgentClient.connect("ws://127.0.0.1:8765", "", 1500);
+          if (localAgentClient.isConnected()) {
+            clearInterval(interval);
+            setAgentConnecting(false);
+            setShowLocalModal(false);
+            setIsLocalShell(true);
+            const info = localAgentClient.getAgentInfo();
+            if (info?.shell) setShellName(info.shell.split("/").pop() || info.shell);
+            for (const tab of tabsRef.current) {
+              const rt = runtimesRef.current.get(tab.id);
+              if (rt && !rt.attached && !(rt as any)._attaching) {
+                attachTerminal(tab.id, tab.terminalId);
+              }
+            }
+            onOutputLogRef.current?.("[terminal] Successfully connected to personal local terminal via CodeTogether Agent");
+            return;
+          }
+        } catch {}
+      }
+
+      if (attempts >= 60) {
         clearInterval(interval);
         setAgentConnecting(false);
       }
-    }, 400);
+    }, 1000);
   }, [attachTerminal, pairToken, roomId]);
 
   // ── Init xterm for a tab ──
@@ -810,7 +816,24 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
           }
           case "agent:disconnected": {
             setIsLocalShell(false);
+            setShellName("");
             onOutputLogRef.current?.("\r\n[tunnel] Local companion terminal disconnected");
+            break;
+          }
+          case "agent:status": {
+            if (msg.connected) {
+              setIsLocalShell(true);
+              if (msg.shell) setShellName(msg.shell.split("/").pop() || msg.shell);
+              setAgentConnecting(false);
+              setShowLocalModal(false);
+              for (const tab of tabsRef.current) {
+                const rt = runtimesRef.current.get(tab.id);
+                if (rt && !rt.attached && !(rt as any)._attaching) {
+                  attachTerminal(tab.id, tab.terminalId);
+                }
+              }
+              onOutputLogRef.current?.("[terminal] Local terminal agent detected via tunnel");
+            }
             break;
           }
           case "output": {
@@ -1136,29 +1159,65 @@ function computeRunCommand(lang: string, activePath: string, code: string): stri
             </div>
 
             <div className="p-5 space-y-4 text-xs text-gray-300 leading-relaxed">
-              <p>
-                Connect your personal terminal directly to this collaborative session via the local agent or <span className="font-mono text-sky-300">codetogether://</span> protocol launcher.
-              </p>
-
-              {/* 1-Click Launch Button (Above OS Commands) */}
-              <div className="space-y-1.5">
-                <button
-                  onClick={handleLaunchProtocol}
-                  disabled={agentConnecting}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-900/30 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer"
-                >
-                  {agentConnecting ? <RefreshCw size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-                  {agentConnecting ? "Connecting directly to local terminal…" : "🚀 Launch & Connect Local Terminal"}
-                </button>
-                <p className="text-[10px] text-center text-gray-400">
-                  Instant direct connection if companion is already running.
+              {canUseDirectLocalAgent() ? (
+                <p>
+                  Connect your personal terminal directly to this collaborative session via the local agent or <span className="font-mono text-sky-300">codetogether://</span> protocol launcher.
                 </p>
+              ) : (
+                <div className="space-y-2">
+                  <p>
+                    Connect your personal computer&apos;s terminal to run code on <strong className="text-white">your machine</strong> instead of the server.
+                  </p>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px]">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 animate-pulse" />
+                    <span>Running in 2 steps: (1) Run the command below in your terminal, (2) Come back here and click &quot;Check Connection&quot;</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Connection Status */}
+              {agentConnecting && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-200 text-[11px]">
+                  <RefreshCw size={12} className="animate-spin" />
+                  <span>Waiting for your local terminal to connect...</span>
+                </div>
+              )}
+
+              {isLocalShell && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-[11px]">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span>Connected to <strong>{shellName || "your terminal"}</strong></span>
+                </div>
+              )}
+
+              {/* 1-Click Launch Button */}
+              <div className="space-y-1.5">
+                {!isLocalShell && (
+                  <button
+                    onClick={handleLaunchProtocol}
+                    disabled={agentConnecting}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-sky-900/30 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                  >
+                    {agentConnecting ? <RefreshCw size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                    {agentConnecting ? "Waiting for local terminal connection..." : canUseDirectLocalAgent() ? "🚀 Launch & Connect Local Terminal" : "🔍 Check Connection"}
+                  </button>
+                )}
+                {isLocalShell && (
+                  <button
+                    onClick={() => { setShowLocalModal(false); }}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition-all cursor-pointer"
+                  >
+                    <Check size={15} /> Connected! Close
+                  </button>
+                )}
               </div>
 
               {/* First Time Setup Helper (Below Launch) */}
               <div className="pt-3 border-t border-[#27272a]">
                 <p className="text-[11px] text-gray-400 mb-2">
-                  First time? Select your OS, run this 1-line setup command, then click <strong>Launch</strong> above:
+                  {canUseDirectLocalAgent()
+                    ? "First time? Run this 1-line setup command, then click Launch above:"
+                    : "Step 1: Copy and run this command in your Mac/PC terminal:"}
                 </p>
 
                 {/* OS Selector Tabs */}
